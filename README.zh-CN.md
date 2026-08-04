@@ -67,6 +67,39 @@ Umo Editor Mobile 是基于 Vue3 和 Tiptap3 构建的移动端文档编辑器�
 - 在 [CodeSandbox](https://codesandbox.io/p/github/umodoc/demo/main?import=true) 上查看和运行该项目。
 - 在 [Github Pages](https://umodoc.github.io/demo/) 上查看和运行该项目。
 
+## 本地开发
+
+本仓库是 Umo Editor 源码本身（基于 Vue3 + Tiptap3，使用 Vite 打包的组件库）。本地启动步骤如下：
+
+```bash
+# 1. 克隆仓库
+git clone https://github.com/umodoc/editor.git
+cd editor
+
+# 2. 安装依赖
+npm install
+
+# 3. 启动开发服务器（Vite，端口 9000，自动打开浏览器）
+npm run dev
+
+# 4. 构建组件库产物（输出到 dist/）
+npm run build
+```
+
+开发服务器地址为 `http://localhost:9000/umo-editor`（`vite.config.js` 中 `base` 设置为 `/umo-editor`）。
+
+### 可用脚本
+
+| 命令               | 说明                                                                   |
+| ------------------ | ---------------------------------------------------------------------- |
+| `npm run dev`      | 启动 Vite 开发服务器（端口 9000，自动打开浏览器，带 `--force` 参数）   |
+| `npm run build`    | 构建组件库到 `dist/`（产物为 `umo-editor.js` / `umo-editor.css`）       |
+| `npm run lint`     | 使用 oxlint 检查并修复 `src/` 目录下的源文件                           |
+| `npm run format`   | 使用 oxfmt 格式化代码                                                  |
+| `npm run analyzer` | 运行 `vite-bundle-visualizer` 分析打包体积                             |
+
+> **提示**：本组件库以 `@umoteam/editor` 的名称发布到 npm。如果你只是想在项目中**使用** Umo Editor，无需运行本仓库，请直接参考[示例项目](#示例项目)和[开发文档](https://dev.umodoc.com/cn/docs/editor)。
+
 ## 开发文档
 
 请访问[https://dev.umodoc.com/cn/docs/editor](https://dev.umodoc.com/cn/docs/editor)。
@@ -119,7 +152,7 @@ Umo Editor 的诞生旨在解决 Web 应用中文档编辑的复杂性，为 Web
 
 ## 环境支持
 
-- **Node.js** (>=v18.x)
+- **Node.js** (^20.19.0 || >=22.12.0)
 - **Vue** (>=v3.x)
 - **Tiptap** (>=v3.x)
 

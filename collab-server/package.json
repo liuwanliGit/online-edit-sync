@@ -1,0 +1,19 @@
+{
+  "name": "umo-collab-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Umo Editor 阶段一最小协同服务（Hocuspocus + 内存持久化）",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node e2e-test.mjs"
+  },
+  "dependencies": {
+    "@hocuspocus/server": "^2.13.0",
+    "yjs": "13.6.29"
+  },
+  "devDependencies": {
+    "@hocuspocus/provider": "^2.13.0"
+  }
+}

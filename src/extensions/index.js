@@ -341,6 +341,18 @@ export const getDefaultExtensions = ({ container, options, uploadFileMap }) => {
     )
   }
 
+  // 内置扩展（如 UndoRedo）直接放入了 buildInExtensions，绕过了上面的 disableExtensions 过滤。
+  // 这里统一剔除 disableExtensions 中显式声明的内置扩展，
+  // 使协同模式等场景可以禁用与 y-prosemirror 冲突的扩展（UndoRedo 注册的 history 插件
+  // 与 @tiptap/extension-collaboration 自带的 Yjs history 实现互斥）。
+  if (disableExtensions?.length) {
+    for (let i = buildInExtensions.length - 1; i >= 0; i -= 1) {
+      if (disableExtensions.includes(buildInExtensions[i]?.name)) {
+        buildInExtensions.splice(i, 1)
+      }
+    }
+  }
+
   return buildInExtensions
 }
 

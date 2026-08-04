@@ -64,6 +64,39 @@ You can also preview and run it online with StackBlitz, CodeSandbox, or Github P
 - View and run on [CodeSandbox](https://codesandbox.io/p/github/umodoc/demo/main?import=true)
 - View and run on [Github Pages](https://umodoc.github.io/demo/)
 
+## Local Development
+
+This repository contains the source code of Umo Editor itself (a Vue3 + Tiptap3 component library, bundled with Vite). To run it locally:
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/umodoc/editor.git
+cd editor
+
+# 2. Install dependencies
+npm install
+
+# 3. Start the dev server (Vite, port 9000, opens browser automatically)
+npm run dev
+
+# 4. Build the library for production (outputs to dist/)
+npm run build
+```
+
+The dev server runs at `http://localhost:9000/umo-editor` (the `base` is set to `/umo-editor` in `vite.config.js`).
+
+### Available Scripts
+
+| Command             | Description                                                              |
+| ------------------- | ------------------------------------------------------------------------ |
+| `npm run dev`       | Start the Vite dev server (port 9000, auto-open browser, `--force` flag) |
+| `npm run build`     | Build the component library to `dist/` (`umo-editor.js` / `umo-editor.css`) |
+| `npm run lint`      | Lint and auto-fix source files in `src/` with oxlint                      |
+| `npm run format`    | Format the codebase with oxfmt                                           |
+| `npm run analyzer`  | Run `vite-bundle-visualizer` to analyze the bundle size                  |
+
+> **Note**: The library is published as `@umoteam/editor`. If you only want to **use** Umo Editor in your own project, you do not need to run this repo — see the [Example Project](#example-project) and [Documentation](https://dev.umodoc.com/en/docs/editor) instead.
+
 ## Documentation
 
 Please visit [Documentation](https://dev.umodoc.com/en/docs/editor) for detailed instructions.
@@ -114,7 +147,7 @@ For more details, see [Features](https://dev.umodoc.com/en/docs/editor/features)
 
 ## Environment Support
 
-- **Node.js** (>=v18.x)
+- **Node.js** (^20.19.0 || >=22.12.0)
 - **Vue** (>=v3.x)
 - **Tiptap** (>=v3.x)
 
