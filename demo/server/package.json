@@ -1,0 +1,15 @@
+{
+  "name": "umo-editor-demo-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Umo Editor demo 后端：文档元数据管理（列表/创建/删除）。协同编辑由 collab-server 负责，本服务不碰 Yjs 二进制。",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "13.0.2",
+    "uuid": "10.0.0"
+  }
+}

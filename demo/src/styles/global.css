@@ -1,0 +1,50 @@
+:root {
+  --demo-primary: #4d8cf2;
+  --demo-primary-dark: #3b78dc;
+  --demo-text: #1d2129;
+  --demo-text-secondary: #4e5969;
+  --demo-text-tertiary: #86909c;
+  --demo-border: #e5e6eb;
+  --demo-bg: #f5f7fa;
+  --demo-card-bg: #ffffff;
+  --demo-shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.04);
+  --demo-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --demo-shadow-lg: 0 8px 30px rgba(29, 33, 41, 0.12);
+  --demo-radius: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+  color: var(--demo-text);
+  background: var(--demo-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100%;
+}
+
+/* 路由切换淡入 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.22s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* 让 TDesign Message 层级高于编辑器工具栏 */
+.t-message {
+  z-index: 10000 !important;
+}

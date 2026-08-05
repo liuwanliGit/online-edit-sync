@@ -1,7 +1,113 @@
 <template>
-  <div v-if="$toolbar.show" class="umo-toolbar-container">
+  <!-- ============ Ribbon 模式：标题行（文档标题 + actions）在上，tabs 在下 ============ -->
+  <div
+    v-if="$toolbar.show && $toolbar.mode === 'ribbon'"
+    class="umo-toolbar-container umo-toolbar-container-ribbon"
+  >
+    <!-- 标题行：左侧文档标题，右侧 actions（保存状态/切换工具栏/宿主注入位） -->
+    <div class="umo-toolbar-header">
+      <div class="umo-toolbar-title" :title="documentTitle">
+        {{ documentTitle }}
+      </div>
+      <div class="umo-toolbar-actions umo-toolbar-actions-ribbon">
+        <t-popup
+          v-if="
+            options.toolbar.showSaveLabel && options.document.readOnly !== true
+          "
+          v-model="statusPopup"
+          :attach="container"
+          trigger="click"
+          placement="bottom-right"
+          @visible-change="(visible) => (statusPopup = visible)"
+        >
+          <t-button
+            class="umo-toolbar-actions-button"
+            variant="text"
+            size="small"
+            :class="{ active: statusPopup }"
+          >
+            <span class="umo-status">
+              <span
+                class="umo-status-online"
+                :class="{ offline: !online }"
+              ></span>
+              <span class="umo-status-saved button-text">
+                <span
+                  v-if="savedAt"
+                  v-text="t('save.savedAtText', { time: timeAgo(savedAt) })"
+                ></span>
+                <span v-else class="unsaved" v-text="t('save.unsaved')"></span>
+              </span>
+            </span>
+          </t-button>
+          <template #content>
+            <div class="umo-document-status-container umo-status">
+              <div>
+                {{ t('save.network') }}
+                {{ online ? t('save.online') : t('save.offline') }}
+              </div>
+              <div>
+                {{ t('save.savedAt') }}
+                <span
+                  v-if="savedAt"
+                  v-text="t('save.savedAtText', { time: timeAgo(savedAt) })"
+                ></span>
+                <span v-else v-text="t('save.unsaved')"></span>
+              </div>
+              <div class="umo-document-button-container">
+                <t-button
+                  size="small"
+                  @click="saveContent"
+                  v-text="t('save.text')"
+                ></t-button>
+                <t-button
+                  size="small"
+                  variant="outline"
+                  @click="setContentFromCache"
+                  v-text="t('save.cache.text')"
+                >
+                </t-button>
+              </div>
+            </div>
+          </template>
+        </t-popup>
+        <t-dropdown
+          trigger="click"
+          size="small"
+          placement="bottom-right"
+          :popup-props="{
+            destroyOnClose: true,
+            attach: container,
+          }"
+          @click="toggleToolbarMode"
+        >
+          <t-button
+            class="umo-toolbar-actions-button"
+            variant="text"
+            size="small"
+          >
+            <icon name="expand-down" />
+            <span class="umo-button-text">{{ t('toolbar.toggle') }}</span>
+          </t-button>
+          <template #dropdown>
+            <t-dropdown-menu
+              v-for="item in editorModeOptions"
+              :key="item.value"
+              :content="item.label"
+              :value="item.value"
+              :divider="item.divider"
+              :active="item.value === $toolbar.mode"
+            >
+              <template #prefixIcon>
+                <icon :name="item.prefixIcon" />
+              </template>
+            </t-dropdown-menu>
+          </template>
+        </t-dropdown>
+      </div>
+    </div>
+    <!-- tabs + 工具按钮组 -->
     <toolbar-ribbon
-      v-if="$toolbar.mode === 'ribbon'"
       :menus="toolbarMenus"
       :current-menu="toolbarActive"
       @menu-change="menuChange"
@@ -14,8 +120,13 @@
         <slot :name="`toolbar_${item}`" v-bind="props" />
       </template>
     </toolbar-ribbon>
+  </div>
+  <!-- ============ Classic 模式：保持原结构（tabs 与 actions 同行） ============ -->
+  <div
+    v-else-if="$toolbar.show && $toolbar.mode === 'classic'"
+    class="umo-toolbar-container"
+  >
     <toolbar-classic
-      v-if="$toolbar.mode === 'classic'"
       :menus="toolbarMenus"
       :current-menu="toolbarActive"
       @menu-change="menuChange"
@@ -145,8 +256,12 @@ const editor = inject('editor')
 const savedAt = inject('savedAt')
 const options = inject('options')
 const $toolbar = useState('toolbar', options)
+const $document = useState('document', options)
 let statusPopup = $ref(false)
 const online = useOnline()
+
+// 标题行显示的文档标题（响应式，用户在编辑器内改标题会自动更新）
+const documentTitle = computed(() => $document.value?.title || '')
 
 // 工具栏菜单
 const defaultToolbarMenus = [
@@ -245,15 +360,37 @@ const setContentFromCache = () => {
   justify-content: space-between;
   user-select: none;
   position: relative;
+  // ribbon 模式：标题行在上，tabs/按钮在下，纵向排列
+  &.umo-toolbar-container-ribbon {
+    flex-direction: column;
+  }
+}
+// ribbon 模式标题行：左文档标题，右 actions
+.umo-toolbar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 14px;
+  border-bottom: solid 1px var(--umo-border-color-light);
+  min-height: 34px;
+}
+.umo-toolbar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--umo-text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 50%;
 }
 .umo-toolbar-actions {
   padding: 6px 10px;
   display: flex;
   align-items: center;
+  // ribbon 模式：actions 在标题行内自然右对齐，不再绝对定位
   &-ribbon {
-    position: absolute;
-    right: 0;
-    top: 1px;
+    position: static;
+    padding: 0;
   }
   &-button {
     &.active {
@@ -353,9 +490,10 @@ const setContentFromCache = () => {
     }
   }
   &.toolbar-ribbon {
-    .umo-toolbar-actions {
-      right: 5px !important;
-      top: 6px !important;
+    // ribbon 模式 actions 已在标题行内（static 定位），无需 right/top 覆盖。
+    // modern skin 下给标题行一点呼吸感。
+    .umo-toolbar-header {
+      padding: 8px 15px;
     }
   }
 }

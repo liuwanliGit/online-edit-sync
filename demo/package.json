@@ -1,0 +1,29 @@
+{
+  "name": "umo-editor-demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Umo Editor 宿主应用 demo：登录 → 文档列表 → 文档编辑",
+  "scripts": {
+    "dev": "vite --port 5173 --open",
+    "build": "vite build",
+    "preview": "vite preview --port 5173"
+  },
+  "dependencies": {
+    "@hocuspocus/provider": "^4.4.0",
+    "@tiptap/core": "3.20.0",
+    "@tiptap/extension-collaboration": "3.20.0",
+    "@tiptap/y-tiptap": "3.0.8",
+    "@umoteam/editor": "file:..",
+    "tdesign-icons-vue-next": "^0.4.7",
+    "tdesign-vue-next": "^1.18.2",
+    "uuid": "^10.0.0",
+    "vue": "^3.5.29",
+    "vue-router": "^4.5.0",
+    "yjs": "13.6.29"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.8",
+    "vite": "^7.3.6"
+  }
+}
