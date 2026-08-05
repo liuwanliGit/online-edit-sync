@@ -43,7 +43,7 @@ npm run dev
 | JWT 鉴权 | ✅ 完成 | HS256，服务端验证 + 文档级权限校验 |
 | 数据库持久化 | ✅ 完成 | SQLite（WAL 模式），重启不丢数据 |
 | 多文档编辑 | ✅ 完成 | URL 参数 `?doc=xxx` 指定文档，互不干扰 |
-| 撤销/重做 | ⏸️ 卡在上游 bug | Umo 层改动已完成，根因在 y-tiptap（见第七节） |
+| 撤销/重做 | ⚠️ undo 已修复 / redo 部分可用 | undo 已工作，redo 栈被清空（见第七节） |
 
 ### 三阶段规划
 
@@ -263,41 +263,64 @@ if (fragment.length === 0) {
 
 ---
 
-## 七、撤销/重做：深层诊断（卡点，待修复）
+## 七、撤销/重做：已修复 undo，redo 仍有边界问题
 
-### Umo 层面改动已完成（见 3.5 节），逻辑正确，卡在两个上游 bug
+### 当前状态（2024 实测修复后）
 
-**Bug A：y-tiptap 嵌套事务导致 UndoManager 栈永远为空**
-- `@tiptap/y-tiptap` 的 `_prosemirrorChanged`（y-tiptap.js:811）内部开了 `this.doc.transact(fn, ySyncPluginKey)`，而外层 ySyncPlugin 的 update 钩子（y-tiptap.js:266-270）已经在 `doc.transact()` 内调用了它
-- 嵌套事务导致 Yjs 的 `transaction.changedParentTypes` 在 UndoManager 的 `afterTransactionHandler`（yjs.mjs:3625-3633）里为空
-- UndoManager 的 scope 检查 `changedParentTypes.has(xmlFragment)` 永远为 false → 操作不进 undo 栈
-- 诊断证据：monkey-patch `ydoc.emit` 统计 afterTransaction 触发 13 次，但 `changedParentTypesCount` 始终为 0
+| 功能 | 状态 | 说明 |
+|---|---|---|
+| 协同 undo（撤销） | ✅ 已修复 | 操作进栈，按钮 enabled，撤销后内容回滚 |
+| 协同 redo（重做） | ⚠️ 部分可用 | undo 后 redo 栈被清空，无法重做（见下方"redo 遗留问题"） |
 
-**Bug A2：去掉嵌套事务后 undo 数据损坏**
-- 尝试去掉 `_prosemirrorChanged` 的嵌套事务（直接在外层事务执行 `updateYFragment`）→ 栈增长成功（按钮变 enabled）→ 但 `undoManager.undo()` 执行后内容不回滚
-- `updateYFragment` 需要在自己的事务上下文里正确记录 Yjs item 变更，直接在外层事务执行导致 stack item 数据不完整
+### 修复内容（都在 `src/components/index.vue`，协同模式的 `editor.on('create')` 钩子里）
 
-**Bug B：extension-collaboration 的 preventDispatch 导致命令不执行**
-- `@tiptap/extension-collaboration` 的 undo/redo 命令（dist/index.js:107-131）设置了 `tr.setMeta('preventDispatch', true)`
-- Tiptap 3.x 的命令执行器在 `preventDispatch` 时不传 `dispatch` 参数
-- 命令在 `if (!dispatch) return true` 处直接返回，**永远不执行 `undo(state)`**
-- 诊断证据：y-tiptap 的 `undo` 函数加日志，Ctrl+Z 后始终未被调用
+**1. 绕过 extension-collaboration 坏掉的 undo/redo 命令（原 Bug B）**
+- 直接从 `yUndoPlugin` 的 plugin state 取出 Yjs UndoManager：`yUndoPluginKey.getState(editor.state).undoManager`
+- `undoHistory`/`redoHistory` 协同分支改为直接调 `um.undo()` / `um.redo()`，不走 `editor.commands.undo()`（后者因 Tiptap3 preventDispatch 永不执行）
+- 用 `yUndoPluginKey` 必须从 `@tiptap/y-tiptap` import 同一个实例；**不能 `new PluginKey('y-undo')` 重建**——ProseMirror 的 `createKey` 是模块级计数器，重建会得到 `y-undo$1` 而 getState 永远 undefined
+- 按钮状态（`collabCanUndo/Redo`）改为监听 UndoManager 的 `stack-item-added/popped/updated/cleared` 事件刷新
 
-**死锁关系**：Bug A 让栈空，去掉嵌套事务让栈数据损坏（A2），Bug B 独立阻断命令执行。
+**2. 修复 UndoManager trackedOrigins 多副本问题（原 Bug A 的真正根因）**
+- **根因**：UndoManager 的 `trackedOrigins` Set 里登记的 `ySyncPluginKey` 实例，与 `_prosemirrorChanged` 开事务时实际用的 `ySyncPluginKey` 实例**不是同一个对象引用**（两者 `.key` 均为 `'y-sync$'` 但 `===` 为 false）。疑似 Vite 预构建导致 y-tiptap 的 PluginKey 存在两个实例。
+- 后果：`afterTransactionHandler` 里 `trackedOrigins.has(tx.origin)` 用 Set 引用相等判断 → 永远 false → 操作不进 undo 栈（栈始终为空）。
+- 诊断铁证：浏览器实测 `trackedDetails: [{ctor:"PluginKey", key:"y-sync$", sameRef:false}]`——两个实例 key 相同但引用不同。
+- **修复**：在 ydoc 的 `beforeTransaction`（事务执行前）监听里，捕获事务实际用的 origin 实例，补登记进 `trackedOrigins`：
+  ```js
+  binding.doc.on('beforeTransaction', (tx) => {
+    if (tx.origin?.key === 'y-sync$' && !um.trackedOrigins.has(tx.origin)) {
+      um.trackedOrigins.add(tx.origin)
+    }
+  })
+  ```
+  必须用 `beforeTransaction` 而非 `afterTransaction`——后者在 UndoManager 的 handler 之后触发，第一次真实改动的事务已经错过进栈时机。
+- E2E 验证：输入后 `undo栈=1 canUndo=true`，`um.undo()` 后内容回滚（`doc含E2E=false`）。
 
-**升级 y-tiptap 无法解决**：3.0.8 已是最新版（latest），GitHub main 分支源码与 3.0.8 完全一致，bug 在上游仍存在。
+### redo 遗留问题（未修复）
 
-**建议的后续方向**：
-1. 向 tiptap 官方报 issue（两个 bug 都有精确诊断证据）
-2. 深入研究 Yjs `cleanupTransactions` 为什么嵌套时不合并 `changed`
-3. 换完全不同的 undo 方案：不用 Yjs UndoManager，按 PM 事务 origin 自定义 undo
+`um.undo()` 执行后，redo 栈仍为空（`redoStack.length === 0`），无法 redo。
+- **推测原因**：`um.undo()` 产生 origin=UndoManager 的 ydoc 事务 → ydoc 变化触发 ySyncPlugin 的 `_typeChanged`（远程→PM 整体重建）→ PM 重建触发 `_prosemirrorChanged` → 产生新的 origin=y-sync$ 事务 → UndoManager 把它当作"新编辑"，**清空 redoStack**（UndoManager 遇到非 undo/redo 事务会清 redo 栈）。
+- 这是协同 undo 的经典难题：本地 undo 的效果经过 ydoc 中转后，会触发额外的"看起来像新编辑"的事务。
+- **可能的修复方向**：
+  1. 在 `_typeChanged` 触发的 `_prosemirrorChanged` 事务上标记 origin 为 UndoManager（避免清 redo 栈）
+  2. 用 `um.stopCapturing()` 的时机控制
+  3. 监听 UndoManager 的 `stack-item-popped` 事件，手动维护 redo 栈
 
-**关键源码位置**：
-- `@tiptap/y-tiptap/dist/y-tiptap.js:811`：`_prosemirrorChanged`（嵌套事务 bug）
-- `@tiptap/y-tiptap/dist/y-tiptap.js:266-270`：ySyncPlugin update 钩子（外层事务）
-- `@tiptap/extension-collaboration/dist/index.js:107-131`：undo/redo 命令（preventDispatch bug）
-- `yjs/dist/yjs.mjs:3625-3633`：UndoManager afterTransactionHandler（scope 检查）
-- `yjs/dist/yjs.mjs:5020-5031`：`callTypeObservers`（填充 changedParentTypes）
+### 历史诊断（已被实测推翻，保留作参考）
+
+> 以下是最初的推测，已被实测推翻。真正根因见上方"修复内容"。
+
+**原推测 Bug A（错误）**：曾怀疑是 y-tiptap 的"嵌套事务"导致 `changedParentTypes` 为空。实测证明 `updateYFragment` 本身工作正常（Node 脚本验证：空 paragraph + PM 文本能正确写入 ydoc），且 `_prosemirrorChanged` 被调用时 ydoc 确实变化了（`ydocChanged=true`）。真正问题是 UndoManager 的 origin 引用不匹配，与嵌套事务无关。
+
+**原推测 Bug B（正确）**：extension-collaboration 的 `preventDispatch` 问题确实存在，诊断准确。修复方式是绕过命令、直接调 undoManager。
+
+**额外发现（Tiptap 命令系统在协同下的限制）**：实测发现 `editor.chain().insertContent().run()` 在协同模式下不改 PM doc（`textBefore === textAfter`），而 PM 原生 `view.dispatch(tr)` 正常。这是 Tiptap 3.x 命令系统与协同模式的另一个兼容问题，但不影响 undo（undo 走的是 um.undo()，不走 Tiptap 命令）。真实键盘输入走 PM 原生 dispatch 路径，不受此影响。
+
+### 关键源码位置
+- `src/components/index.vue` `editor.on('create')` 钩子：undoManager 取出 + trackedOrigins 修复 + 事件刷新
+- `src/components/index.vue` `undoHistory`/`redoHistory`：协同分支直接调 `um.undo()/redo()`
+- `@tiptap/y-tiptap` `_prosemirrorChanged`（y-tiptap.js:~811）：用 `ySyncPluginKey` 开事务（产生 origin）
+- `@tiptap/y-tiptap` `yUndoPlugin`（y-tiptap.js:~2864）：`trackedOrigins: new Set([ySyncPluginKey].concat(...))`
+- `yjs` `UndoManager.afterTransactionHandler`（yjs.mjs:3625-3633）：`trackedOrigins.has(transaction.origin)` 检查
 
 ---
 

@@ -837,13 +837,20 @@
       font-size: 0.85em;
     }
   }
+}
 
-  // ==================== 协同编辑：远程协作者光标/选区 ====================
-  // 由 @tiptap/y-tiptap 的 yCursorPlugin 生成：
-  //   <span class="ProseMirror-yjs-cursor" style="border-color: #hex">
-  //     ⁠<div style="background-color: #hex">用户名</div>⁠
-  //   </span>
-  // border-color 和 background-color 由插件内联设置，这里只控制形状/定位/动画。
+// ==================== 协同编辑：远程协作者光标/选区 ====================
+// 注意：这段样式必须放在 .umo-editor-content 直接作用域下，不能嵌套进
+// :-webkit-any(article, aside, nav, section) 之类的限定块——否则光标 span 的
+// 祖先是 .ProseMirror/p（非 article 等），选择器匹配不上，导致 opacity/position
+// 等样式失效，用户名 div 会以 block + opacity:1 渲染，占满一整行。
+//
+// DOM 结构（由 @tiptap/y-tiptap 的 yCursorPlugin 生成）：
+//   <span class="ProseMirror-yjs-cursor" style="border-color: #hex">
+//     ⁠<div style="background-color: #hex">用户名</div>⁠
+//   </span>
+// border-color 和 background-color 由插件内联设置，这里只控制形状/定位/动画。
+.umo-editor-content {
   .ProseMirror-yjs-cursor {
     position: relative;
     margin-left: -1px;

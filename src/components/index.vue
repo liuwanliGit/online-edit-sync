@@ -60,6 +60,7 @@ import {
   isString,
 } from '@tool-belt/type-predicates'
 import { AllSelection } from '@tiptap/pm/state'
+import { yUndoPluginKey } from '@tiptap/y-tiptap'
 import domToImage from 'dom-to-image-more'
 import enConfig from 'tdesign-vue-next/esm/locale/en_US'
 import cnConfig from 'tdesign-vue-next/esm/locale/zh_CN'
@@ -120,8 +121,13 @@ const historyRecords = ref({
   isUndoRedo: false, // 标记是否正在执行撤销/重做操作
   editorCount: 0,
 })
-// 协同模式下编辑器撤销/重做能力由 Yjs UndoManager 提供，无法从 historyRecords 队列推断，
-// 这里用响应式状态单独维护，在 editor transaction 时刷新（undo.vue / redo.vue 据此禁用按钮）。
+// 协同模式下编辑器撤销/重做能力由 Yjs UndoManager 提供，无法从 historyRecords 队列推断。
+// 这里直接持有 undoManager 引用，并监听其栈变化事件刷新 collabCanUndo/Redo
+// （undo.vue / redo.vue 据此禁用按钮）。
+// 注意：不能用 editor.can().undo() 探测——它走 extension-collaboration 的 undo 命令，
+// 该命令在 Tiptap3 下因 preventDispatch 永远不执行 undo(state)（上游 bug），
+// 故绕过命令、直接从 plugin state 取 undoManager 并监听事件。
+const collabUndoManager = ref(null)
 const collabCanUndo = ref(false)
 const collabCanRedo = ref(false)
 
@@ -161,6 +167,7 @@ provide('uploadFileMap', uploadFileMap)
 // provide('bookmark', bookmark)
 provide('destroyed', destroyed)
 provide('historyRecords', historyRecords)
+provide('collabUndoManager', collabUndoManager)
 provide('collabCanUndo', collabCanUndo)
 provide('collabCanRedo', collabCanRedo)
 provide('typeWriterIsRunning', typeWriterIsRunning)
@@ -316,6 +323,47 @@ watch(
     editor.value.on('create', ({ editor }) => {
       destroyed.value = false
       emits('created', { editor })
+      // 协同模式：从 yUndoPlugin 的 plugin state 取出 Yjs UndoManager，
+      // 绕过 extension-collaboration 坏掉的 undo/redo 命令（Tiptap3 preventDispatch bug），
+      // 后续 undoHistory/redoHistory 直接调 undoManager.undo()/redo()。
+      // 同时监听栈变化事件，刷新 collabCanUndo/Redo 供按钮 disabled 判断。
+      // 必须用 y-tiptap 导出的同一个 yUndoPluginKey 实例取 state——
+      // 不能 new PluginKey('y-undo') 重建：createKey 是模块级计数器，
+      // 重建会得到 'y-undo$1' 而真正注册的是 'y-undo$'，getState 永远返回 undefined。
+      if (options.value.disableExtensions.includes('undoRedo')) {
+        const um = yUndoPluginKey.getState(editor.state)?.undoManager
+        if (um) {
+          collabUndoManager.value = um
+          const refresh = () => {
+            collabCanUndo.value = um.undoStack.length > 0
+            collabCanRedo.value = um.redoStack.length > 0
+          }
+          refresh()
+          um.on('stack-item-added', refresh)
+          um.on('stack-item-popped', refresh)
+          um.on('stack-item-updated', refresh)
+          um.on('stack-cleared', refresh)
+        }
+        // [Bug A 修复] UndoManager 的 trackedOrigins 里登记的 ySyncPluginKey 实例
+        // 与 _prosemirrorChanged 开事务时实际用的 ySyncPluginKey 实例不一致
+        // （两者 .key 均为 'y-sync$' 但不是同一对象引用——疑似 Vite 预构建或模块解析
+        // 导致 y-tiptap 的 PluginKey 存在两个实例）。Set.has 用引用相等判断，
+        // 导致 UndoManager.afterTransactionHandler 的 origin 检查永远 false，操作不进 undo 栈。
+        // 修复：在 beforeTransaction（事务执行前）捕获实际 origin 实例，补登记进 trackedOrigins。
+        try {
+          const ySyncKey = editor.view.state.plugins.find((p) => p.key === 'y-sync$')
+          const binding = ySyncKey?.getState(editor.view.state)?.binding
+          if (binding?.doc) {
+            binding.doc.on('beforeTransaction', (tx) => {
+              if (tx.origin?.key === 'y-sync$' && !um.trackedOrigins.has(tx.origin)) {
+                um.trackedOrigins.add(tx.origin)
+              }
+            })
+          }
+        } catch (e) {
+          console.warn('[collab] 注册 trackedOrigins 修复失败:', e)
+        }
+      }
     })
     editor.value.on('update', ({ editor }) => {
       emits('changed', { editor })
@@ -326,12 +374,6 @@ watch(
     })
     editor.value.on('transaction', ({ editor, transaction }) => {
       emits('changed:transaction', { editor, transaction })
-      // 协同模式下刷新 Yjs UndoManager 的撤销/重做能力，
-      // 供工具栏按钮（undo.vue / redo.vue）判断 disabled 状态。
-      if (options.value.disableExtensions.includes('undoRedo')) {
-        collabCanUndo.value = editor.can().undo()
-        collabCanRedo.value = editor.can().redo()
-      }
     })
     editor.value.on('focus', ({ editor, event }) => {
       emits('focus', { editor, event })
@@ -1206,9 +1248,12 @@ const getContentExcerpt = (charLimit = 100, more = ' ...') => {
 }
 /* 撤销 重做操作*/
 // 协同模式下编辑器内容的撤销/重做由 Yjs UndoManager 接管（undoRedo 扩展已禁用，
-// historyRecords 队列里不再有 editor 记录）。此时 editor 撤销直接调
-// editor.commands.undo()（命中 Collaboration 扩展的 Yjs undo 命令），
-// page 类历史（页边距、水印等）仍走 Umo 自建队列弹栈。
+// historyRecords 队列里不再有 editor 记录）。
+// 注意：不能用 editor.commands.undo()/redo()——@tiptap/extension-collaboration
+// 的 undo/redo 命令在 Tiptap3 下因 tr.setMeta('preventDispatch', true) 导致
+// dispatch 为 undefined，命中 `if (!dispatch) return true`，undo(state) 永不执行（上游 bug）。
+// 故直接从 yUndoPlugin state 取出 undoManager，调其 undo()/redo()。
+// page 类历史（页边距、水印等）不受协同影响，仍走 Umo 自建队列弹栈。
 const isCollab = () => options.value.disableExtensions.includes('undoRedo')
 
 const undoHistory = () => {
@@ -1224,8 +1269,8 @@ const undoHistory = () => {
       })
       return
     }
-    // 否则走 Yjs UndoManager 撤销编辑器内容
-    editor?.value?.chain().focus().undo().run()
+    // 否则直接调 Yjs UndoManager 撤销编辑器内容（绕过坏掉的命令）
+    collabUndoManager.value?.undo()
     return
   }
   undoHistoryRecord(historyRecords, function (record) {
@@ -1251,7 +1296,8 @@ const redoHistory = () => {
       })
       return
     }
-    editor?.value?.chain().focus().redo().run()
+    // 直接调 Yjs UndoManager 重做（绕过坏掉的命令）
+    collabUndoManager.value?.redo()
     return
   }
   redoHistoryRecord(historyRecords, function (record) {

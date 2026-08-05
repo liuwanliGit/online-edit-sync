@@ -57,6 +57,12 @@ if (collabEnabled) {
     url: 'ws://localhost:4000',
     name: collabDoc, // 同名 = 同一篇文档，多人协作
     document: ydoc,
+    // 同步节流：把 flushDelay 窗口内的多次编辑合并成一个 Yjs update 再广播。
+    // 80ms 在人眼几乎无感的范围内（连续打字每键间隔约 125-200ms），
+    // 同时能把连续输入的多个按键合并成 1 个网络包，显著降低服务端广播量。
+    // batch 由 provider 的 pendingUpdates 队列 + Y.mergeUpdates 实现，
+    // 光标（awareness）也走同样的节流，内容与光标体验一致。
+    flushDelay: 80,
     // JWT 鉴权：从协同服务器的 /api/token 端点动态获取 token
     token: async () => {
       const res = await fetch(
