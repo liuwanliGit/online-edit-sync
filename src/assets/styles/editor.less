@@ -837,4 +837,45 @@
       font-size: 0.85em;
     }
   }
+
+  // ==================== 协同编辑：远程协作者光标/选区 ====================
+  // 由 @tiptap/y-tiptap 的 yCursorPlugin 生成：
+  //   <span class="ProseMirror-yjs-cursor" style="border-color: #hex">
+  //     ⁠<div style="background-color: #hex">用户名</div>⁠
+  //   </span>
+  // border-color 和 background-color 由插件内联设置，这里只控制形状/定位/动画。
+  .ProseMirror-yjs-cursor {
+    position: relative;
+    margin-left: -1px;
+    margin-right: -1px;
+    border-left: 2px solid;
+    border-right: 2px solid;
+    word-break: normal;
+    pointer-events: none;
+    // 名字标签：默认隐藏，光标悬停时淡入显示
+    > div {
+      position: absolute;
+      top: -1.4em;
+      left: -2px;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: normal;
+      padding: 2px 6px;
+      border-radius: 3px 3px 3px 0;
+      white-space: nowrap;
+      color: #fff;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      user-select: none;
+    }
+    &:hover > div {
+      opacity: 1;
+    }
+  }
+
+  // 远程协作者选区背景（inline decoration，background-color 由插件内联设置）
+  .ProseMirror-yjs-selection {
+    pointer-events: none;
+  }
 }

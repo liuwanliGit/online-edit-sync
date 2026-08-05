@@ -120,6 +120,10 @@ const historyRecords = ref({
   isUndoRedo: false, // 标记是否正在执行撤销/重做操作
   editorCount: 0,
 })
+// 协同模式下编辑器撤销/重做能力由 Yjs UndoManager 提供，无法从 historyRecords 队列推断，
+// 这里用响应式状态单独维护，在 editor transaction 时刷新（undo.vue / redo.vue 据此禁用按钮）。
+const collabCanUndo = ref(false)
+const collabCanRedo = ref(false)
 
 const container = $ref(`#umo-editor-${shortId(4)}`)
 const defaultOptions = inject('defaultOptions', {})
@@ -157,6 +161,8 @@ provide('uploadFileMap', uploadFileMap)
 // provide('bookmark', bookmark)
 provide('destroyed', destroyed)
 provide('historyRecords', historyRecords)
+provide('collabCanUndo', collabCanUndo)
+provide('collabCanRedo', collabCanRedo)
 provide('typeWriterIsRunning', typeWriterIsRunning)
 
 watch(
@@ -320,6 +326,12 @@ watch(
     })
     editor.value.on('transaction', ({ editor, transaction }) => {
       emits('changed:transaction', { editor, transaction })
+      // 协同模式下刷新 Yjs UndoManager 的撤销/重做能力，
+      // 供工具栏按钮（undo.vue / redo.vue）判断 disabled 状态。
+      if (options.value.disableExtensions.includes('undoRedo')) {
+        collabCanUndo.value = editor.can().undo()
+        collabCanRedo.value = editor.can().redo()
+      }
     })
     editor.value.on('focus', ({ editor, event }) => {
       emits('focus', { editor, event })
@@ -1193,7 +1205,29 @@ const getContentExcerpt = (charLimit = 100, more = ' ...') => {
   return text?.substring(0, charLimit) + more
 }
 /* 撤销 重做操作*/
+// 协同模式下编辑器内容的撤销/重做由 Yjs UndoManager 接管（undoRedo 扩展已禁用，
+// historyRecords 队列里不再有 editor 记录）。此时 editor 撤销直接调
+// editor.commands.undo()（命中 Collaboration 扩展的 Yjs undo 命令），
+// page 类历史（页边距、水印等）仍走 Umo 自建队列弹栈。
+const isCollab = () => options.value.disableExtensions.includes('undoRedo')
+
 const undoHistory = () => {
+  if (isCollab()) {
+    // page 记录仍由 Umo 队列管理；队首是 page 时先弹栈处理 page
+    if (historyRecords.value.done.length > 0) {
+      undoHistoryRecord(historyRecords, function (record) {
+        if (record?.type === 'page' && record?.proType) {
+          if (page?.value && record.oldData !== undefined) {
+            page.value[record.proType] = record.oldData
+          }
+        }
+      })
+      return
+    }
+    // 否则走 Yjs UndoManager 撤销编辑器内容
+    editor?.value?.chain().focus().undo().run()
+    return
+  }
   undoHistoryRecord(historyRecords, function (record) {
     if (record?.type === 'editor') {
       editor?.value?.chain().focus().undo().run()
@@ -1206,6 +1240,20 @@ const undoHistory = () => {
   })
 }
 const redoHistory = () => {
+  if (isCollab()) {
+    if (historyRecords.value.undone.length > 0) {
+      redoHistoryRecord(historyRecords, function (record) {
+        if (record?.type === 'page' && record?.proType) {
+          if (page?.value && record.newData !== undefined) {
+            page.value[record.proType] = record.newData
+          }
+        }
+      })
+      return
+    }
+    editor?.value?.chain().focus().redo().run()
+    return
+  }
   redoHistoryRecord(historyRecords, function (record) {
     if (record?.type === 'editor') {
       editor?.value?.chain().focus().redo().run()

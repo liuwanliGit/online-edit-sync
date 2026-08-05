@@ -6,6 +6,7 @@
         确保 y-prosemirror binding 建立时 Yjs 文档已是稳定状态，避免选区转换竞争。
       -->
       <umo-editor v-if="editorReady" ref="editorRef" v-bind="options"></umo-editor>
+      <div v-else-if="collabError" class="loading collab-error">{{ collabError }}</div>
       <div v-else class="loading">正在连接协同服务…</div>
     </div>
     <!-- <div class="box">
@@ -16,34 +17,54 @@
 
 <script setup>
 import Collaboration from '@tiptap/extension-collaboration'
+import { Extension } from '@tiptap/core'
 import { HocuspocusProvider } from '@hocuspocus/provider'
+import { yCursorPlugin } from '@tiptap/y-tiptap'
 import { onUnmounted, ref } from 'vue'
 import * as Y from 'yjs'
 
 import { shortId } from '@/utils/short-id'
 
 // ============ 协同模式开关（URL 带 ?collab=1 启用）============
-const collabEnabled = new URLSearchParams(window.location.search).has('collab')
+const urlParams = new URLSearchParams(window.location.search)
+const collabEnabled = urlParams.has('collab')
+// 协同文档名：URL 参数 ?doc=xxx 指定，默认 demo-doc
+// 不同 doc 值 = 不同的协同文档，互不干扰
+const collabDoc = urlParams.get('doc') || 'demo-doc'
 
 // 每个浏览器标签页作为一个独立的"协作者"，用随机用户名区分光标
+// color 必须是 #RRGGBB 格式（yCursorPlugin 的 defaultSelectionBuilder 会拼 alpha 后缀，
+// 且正则 /^#[0-9a-fA-F]{6}$/ 校验，hsl 格式会导致选区背景色无效）
+const collabColors = [
+  '#e06c75', '#56b6c2', '#c678dd', '#61afef',
+  '#98c379', '#e5c07b', '#d19a66', '#ff6b6b',
+]
 const collabUser = {
   name: `用户-${Math.floor(Math.random() * 1000)}`,
-  color: `hsl(${Math.floor(Math.random() * 360)}, 80%, 50%)`,
+  color: collabColors[Math.floor(Math.random() * collabColors.length)],
 }
 
-// 协同文档：所有 ?collab=1 的标签页连到同一篇文档 demo-doc
+// 协同文档：URL 参数 ?doc=xxx 决定连到哪篇文档，同名 = 同一篇文档
 let ydoc = null
 let provider = null
 const collabExtensions = []
 // 协同模式下编辑器需等 provider 首次同步完成后再挂载；单机模式立即可用
 const editorReady = ref(!collabEnabled)
+const collabError = ref('')
 if (collabEnabled) {
   ydoc = new Y.Doc()
   provider = new HocuspocusProvider({
     url: 'ws://localhost:4000',
-    name: 'demo-doc', // 同名 = 同一篇文档，多人协作
+    name: collabDoc, // 同名 = 同一篇文档，多人协作
     document: ydoc,
-    token: 'demo-token',
+    // JWT 鉴权：从协同服务器的 /api/token 端点动态获取 token
+    token: async () => {
+      const res = await fetch(
+        `http://localhost:4000/api/token?name=${encodeURIComponent(collabUser.name)}&doc=${encodeURIComponent(collabDoc)}`,
+      )
+      const data = await res.json()
+      return data.token
+    },
   })
   // 把当前用户信息写进 awareness，用于显示光标和昵称
   provider.setAwarenessField('user', collabUser)
@@ -51,6 +72,11 @@ if (collabEnabled) {
   provider.on('synced', () => {
     console.log('[collab] 服务端首次同步完成，挂载编辑器')
     editorReady.value = true
+  })
+  // 鉴权失败时显示错误，不挂载编辑器
+  provider.on('authenticationFailed', ({ reason }) => {
+    console.error('[collab] 鉴权失败：', reason)
+    collabError.value = `协同鉴权失败：${reason || '未知原因'}`
   })
   // 修复 y-prosemirror 初始化竞争：
   // Umo 的文档 schema 是 block+，ProseMirror 会强制创建一个默认空段落，
@@ -64,6 +90,18 @@ if (collabEnabled) {
     fragment.push([para])
   }
   collabExtensions.push(Collaboration.configure({ document: ydoc }))
+  // 远程协作者光标/选区显示
+  // yCursorPlugin 全自动管理：监听 awareness 变化 → 重建 decoration，
+  // 并在编辑器聚焦/选区变化时把本地选区写到 awareness.cursor 字段。
+  // 它从 awareness.user 读取每个客户端的 name/color 渲染光标标签和颜色。
+  collabExtensions.push(
+    Extension.create({
+      name: 'collaborationCursor',
+      addProseMirrorPlugins() {
+        return [yCursorPlugin(provider.awareness)]
+      },
+    }),
+  )
   console.log(`[collab] 已启用协同，当前用户: ${collabUser.name}`)
 }
 
@@ -246,6 +284,11 @@ body {
   height: 100%;
   color: #888;
   font-size: 14px;
+}
+.collab-error {
+  color: #ef3f35;
+  flex-direction: column;
+  gap: 8px;
 }
 
 html,

@@ -13,18 +13,19 @@
  */
 
 import { Server } from '@hocuspocus/server'
-import { encodeStateAsUpdate } from 'yjs'
+import jwt from 'jsonwebtoken'
+import { applyUpdate, encodeStateAsUpdate } from 'yjs'
+
+import { closeDb, loadDoc, saveDoc } from './storage.js'
 
 // 注：本版本 @hocuspocus/server 导出的 Server 是一个单例实例（非构造函数），
 // 用 server.configure({...}) 配置 + server.listen() 启动。
 
 // ============ 配置 ============
 const PORT = process.env.PORT || 4000
-const AUTH_TOKEN = process.env.AUTH_TOKEN || 'demo-token' // 阶段一写死，阶段二换 JWT
-
-// ============ 内存持久化 ============
-// key = 文档名，value = Y.Doc 二进制状态（Buffer）
-const store = new Map()
+// JWT 密钥（HS256 对称密钥），生产环境务必通过环境变量设置
+const JWT_SECRET = process.env.JWT_SECRET || 'umo-collab-secret-dev-only'
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h'
 
 // ============ Hocuspocus 服务 ============
 const server = Server
@@ -36,31 +37,60 @@ server.configure({
 
   // ============ 生命周期 hook ============
 
-  // 连接前鉴权（阶段一：简单 token 比对）
-  async onAuthenticate({ token }) {
-    if (token !== AUTH_TOKEN) {
-      throw new Error('鉴权失败：token 不正确')
+  // HTTP 请求处理：提供 JWT 签发端点
+  // GET /api/token?name=用户名&doc=文档名 → 返回签名的 JWT
+  // 同一个端口（4000）同时提供 WebSocket 协同服务和 HTTP token 签发
+  async onRequest({ request, response }) {
+    const url = new URL(request.url, `http://${request.headers.host}`)
+    if (url.pathname === '/api/token' && request.method === 'GET') {
+      const name = url.searchParams.get('name') || `用户-${Math.floor(Math.random() * 1000)}`
+      const doc = url.searchParams.get('doc') || 'demo-doc'
+      const token = jwt.sign({ name, doc }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN })
+      response.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*', // 前端 9000 端口跨域访问 4000
+      })
+      response.end(JSON.stringify({ token, name, doc }))
+      // 抛 falsy 值阻止 Hocuspocus 走默认响应（源码 line 2001-2008：
+      // catch(error) { if (error) throw error } —— falsy error 只跳过默认处理不 rethrow）
+      throw null
     }
-    return true
+    // 其他请求走 Hocuspocus 默认处理
   },
 
-  // 文档加载：从内存取回二进制状态，喂给 Hocuspocus 提供的 document
+  // 连接前鉴权（JWT 验证）
+  async onAuthenticate({ token, documentName, context }) {
+    let payload
+    try {
+      payload = jwt.verify(token, JWT_SECRET)
+    } catch (e) {
+      // 抛带 reason 的对象（不是 Error），前端 authenticationFailed 事件才能收到中文原因
+      throw { reason: `JWT 验证失败：${e.message}` }
+    }
+    // 文档级权限校验：token 里的 doc 必须匹配请求的文档名
+    if (payload.doc && payload.doc !== documentName) {
+      throw { reason: `无权访问文档 "${documentName}"` }
+    }
+    // 把用户信息写入 context，供后续 hook（onLoadDocument 等）使用
+    context.user = { name: payload.name, doc: payload.doc }
+  },
+
+  // 文档加载：从 SQLite 取回二进制状态，喂给 Hocuspocus 提供的 document
   async onLoadDocument({ documentName, document }) {
-    const saved = store.get(documentName)
+    const saved = loadDoc(documentName)
     if (saved) {
-      const { applyUpdate } = await import('yjs')
       applyUpdate(document, new Uint8Array(saved))
-      console.log(`[load] 文档 "${documentName}" 从内存恢复 (${saved.length} bytes)`)
+      console.log(`[load] 文档 "${documentName}" 从 SQLite 恢复 (${saved.length} bytes)`)
     } else {
       console.log(`[load] 文档 "${documentName}" 新建`)
     }
   },
 
-  // 文档变更后持久化（Hocuspocus 已做防抖，停顿后触发）
+  // 文档变更后持久化（Hocuspocus 已做防抖，停顿 2s 或最多 10s 触发）
   async onStoreDocument({ documentName, document }) {
     const state = Buffer.from(encodeStateAsUpdate(document))
-    store.set(documentName, state)
-    console.log(`[store] 文档 "${documentName}" 已持久化 (${state.length} bytes)`)
+    saveDoc(documentName, state)
+    console.log(`[store] 文档 "${documentName}" 已写入 SQLite (${state.length} bytes)`)
   },
 
   // 连接建立
@@ -76,16 +106,17 @@ server.configure({
   // 启动完成
   async onListen() {
     console.log(`\n✅ 协同服务已启动: ws://localhost:${PORT}`)
-    console.log(`   鉴权 token: ${AUTH_TOKEN}`)
-    console.log(`   持久化方式: 内存 Map（重启丢失）\n`)
+    console.log(`   鉴权方式: JWT (HS256)，签发端点 GET /api/token`)
+    console.log(`   持久化方式: SQLite（WAL 模式）\n`)
   },
 })
 
 // ============ 优雅停机 ============
 const shutdown = async (signal) => {
   console.log(`\n收到 ${signal}，正在关闭...`)
-  console.log(`[shutdown] 当前持久化文档数: ${store.size}`)
   await server.destroy()
+  closeDb()
+  console.log(`[shutdown] SQLite 连接已关闭`)
   process.exit(0)
 }
 

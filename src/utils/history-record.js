@@ -6,8 +6,14 @@
 }
 */
 
-export const addHistory = (records, stepType, data) => {
+export const addHistory = (records, stepType, data, isCollab = false) => {
   if (records.value.isUndoRedo || !data) return
+
+  // 协同模式下编辑器内容的撤销/重做由 Yjs UndoManager 接管，
+  // 不再依赖 ProseMirror 的 state.history$ 计数对齐（undoRedo 扩展已禁用，
+  // history$ 为 undefined，eventCount 永远为 0，会整条短路）。
+  // page 类历史（页边距、水印等）不受协同影响，仍走 Umo 自建队列。
+  if (isCollab && stepType === 'editor') return
 
   stepType === 'editor'
     ? addHistoryEditor(records, stepType, data)

@@ -141,7 +141,12 @@ const editorInstance = new Editor({
     }
   },
   onUpdate({ editor }) {
-    addHistory(historyRecords, 'editor', editor?.state?.history$)
+    addHistory(
+      historyRecords,
+      'editor',
+      editor?.state?.history$,
+      options.value.disableExtensions.includes('undoRedo'),
+    )
     scheduleSyncDocumentContent()
   },
   onBlur() {
