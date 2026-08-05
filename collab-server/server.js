@@ -38,19 +38,23 @@ server.configure({
   // ============ 生命周期 hook ============
 
   // HTTP 请求处理：提供 JWT 签发端点
-  // GET /api/token?name=用户名&doc=文档名 → 返回签名的 JWT
+  // GET /api/token?name=用户名&doc=文档名&role=editor|viewer → 返回签名的 JWT
+  //   role=editor（默认）：可编辑；role=viewer：只读（服务端拒绝其 update）
   // 同一个端口（4000）同时提供 WebSocket 协同服务和 HTTP token 签发
   async onRequest({ request, response }) {
     const url = new URL(request.url, `http://${request.headers.host}`)
     if (url.pathname === '/api/token' && request.method === 'GET') {
       const name = url.searchParams.get('name') || `用户-${Math.floor(Math.random() * 1000)}`
       const doc = url.searchParams.get('doc') || 'demo-doc'
-      const token = jwt.sign({ name, doc }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN })
+      // role 校验：只接受 editor / viewer，默认 editor
+      const roleParam = url.searchParams.get('role')
+      const role = roleParam === 'viewer' ? 'viewer' : 'editor'
+      const token = jwt.sign({ name, doc, role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN })
       response.writeHead(200, {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*', // 前端 9000 端口跨域访问 4000
       })
-      response.end(JSON.stringify({ token, name, doc }))
+      response.end(JSON.stringify({ token, name, doc, role }))
       // 抛 falsy 值阻止 Hocuspocus 走默认响应（源码 line 2001-2008：
       // catch(error) { if (error) throw error } —— falsy error 只跳过默认处理不 rethrow）
       throw null
@@ -58,8 +62,8 @@ server.configure({
     // 其他请求走 Hocuspocus 默认处理
   },
 
-  // 连接前鉴权（JWT 验证）
-  async onAuthenticate({ token, documentName, context }) {
+  // 连接前鉴权（JWT 验证 + 权限控制）
+  async onAuthenticate({ token, documentName, context, connection }) {
     let payload
     try {
       payload = jwt.verify(token, JWT_SECRET)
@@ -71,8 +75,13 @@ server.configure({
     if (payload.doc && payload.doc !== documentName) {
       throw { reason: `无权访问文档 "${documentName}"` }
     }
+    // 权限控制：viewer 设为只读（Hocuspocus 会拒绝该连接的所有 update）
+    // editor 默认可编辑。这是服务端强制，前端 setEditable(false) 只是体验优化。
+    if (payload.role === 'viewer') {
+      connection.readOnly = true
+    }
     // 把用户信息写入 context，供后续 hook（onLoadDocument 等）使用
-    context.user = { name: payload.name, doc: payload.doc }
+    context.user = { name: payload.name, doc: payload.doc, role: payload.role || 'editor' }
   },
 
   // 文档加载：从 SQLite 取回二进制状态，喂给 Hocuspocus 提供的 document

@@ -146,6 +146,65 @@
       >
         <icon name="copyright" /> Umodoc
       </t-button>
+      <!-- 协作者头像组（仅协同模式）：常驻彩色头像，hover 弹出详情浮层 -->
+      <!-- 放在左区末尾（字数统计/版权这些"文档状态"信息旁边），
+           与右区的视图工具（全屏/缩放/语言）分开，语义更清晰 -->
+      <template v-if="isCollab && collaboratorList.length > 0">
+        <div class="umo-status-bar-split"></div>
+        <t-popup
+          trigger="hover"
+          placement="top-left"
+          :attach="container"
+        >
+          <div class="umo-collaborators">
+            <div
+              v-for="c in collaboratorList.slice(0, 5)"
+              :key="c.clientId"
+              class="umo-collaborator-avatar"
+              :style="{ backgroundColor: c.user?.color || '#888' }"
+            >
+              {{ (c.user?.name || '?').charAt(0) }}
+            </div>
+            <span
+              v-if="collaboratorList.length > 5"
+              class="umo-collaborator-more"
+              >+{{ collaboratorList.length - 5 }}</span
+            >
+          </div>
+          <template #content>
+            <div class="umo-collaborators-panel">
+              <div class="umo-collaborators-panel-title">
+                在线协作者（{{ collaboratorList.length }}）
+              </div>
+              <div class="umo-collaborators-panel-hint">
+                头像/光标颜色对应文档中的协作者光标
+              </div>
+              <div
+                v-for="c in collaboratorList"
+                :key="c.clientId"
+                class="umo-collaborators-panel-item"
+              >
+                <span
+                  class="umo-collaborators-panel-dot"
+                  :style="{ backgroundColor: c.user?.color || '#888' }"
+                ></span>
+                <span class="umo-collaborators-panel-name">{{
+                  c.user?.name || '匿名'
+                }}</span>
+                <span
+                  class="umo-collaborators-panel-role"
+                  :class="{
+                    'is-viewer': c.user?.role === 'viewer',
+                  }"
+                  >{{
+                    c.user?.role === 'viewer' ? '只读' : '编辑'
+                  }}</span
+                >
+              </div>
+            </div>
+          </template>
+        </t-popup>
+      </template>
     </div>
     <div class="umo-status-bar-right">
       <tooltip
@@ -346,6 +405,17 @@ const editor = inject('editor')
 const page = inject('page')
 const options = inject('options')
 const $document = useState('document', options)
+
+// 协作者头像组（仅协同模式）：collaborators 由 app.vue 根 provide
+const collaborators = inject('collaborators', ref([]))
+// 协同模式判断：disableExtensions 含 undoRedo 即协同（与 index.vue/undo.vue 一致）
+const isCollab = computed(() =>
+  options.value?.disableExtensions?.includes('undoRedo'),
+)
+// 协作者列表（过滤掉无 user 字段的无效项）
+const collaboratorList = computed(() =>
+  (collaborators.value || []).filter((c) => c?.user),
+)
 
 // 快捷键抽屉
 const showShortcut = $ref(false)

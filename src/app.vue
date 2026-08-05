@@ -5,7 +5,12 @@
         协同模式下，等 HocuspocusProvider 首次同步完成（synced）后再挂载编辑器，
         确保 y-prosemirror binding 建立时 Yjs 文档已是稳定状态，避免选区转换竞争。
       -->
-      <umo-editor v-if="editorReady" ref="editorRef" v-bind="options"></umo-editor>
+      <umo-editor
+        v-if="editorReady"
+        ref="editorRef"
+        v-bind="options"
+        @created="onEditorCreated"
+      ></umo-editor>
       <div v-else-if="collabError" class="loading collab-error">{{ collabError }}</div>
       <div v-else class="loading">正在连接协同服务…</div>
     </div>
@@ -20,9 +25,10 @@ import Collaboration from '@tiptap/extension-collaboration'
 import { Extension } from '@tiptap/core'
 import { HocuspocusProvider } from '@hocuspocus/provider'
 import { yCursorPlugin } from '@tiptap/y-tiptap'
-import { onUnmounted, ref } from 'vue'
+import { onUnmounted, provide, ref } from 'vue'
 import * as Y from 'yjs'
 
+import { getCollabTokenUrl, getCollabWsUrl } from '@/utils/collab-config'
 import { shortId } from '@/utils/short-id'
 
 // ============ 协同模式开关（URL 带 ?collab=1 启用）============
@@ -31,6 +37,9 @@ const collabEnabled = urlParams.has('collab')
 // 协同文档名：URL 参数 ?doc=xxx 指定，默认 demo-doc
 // 不同 doc 值 = 不同的协同文档，互不干扰
 const collabDoc = urlParams.get('doc') || 'demo-doc'
+// 协同权限：URL 参数 ?role=viewer 指定只读，默认 editor（可编辑）
+// demo 阶段用 URL 参数测试，生产环境应由业务系统鉴权后签发带 role 的 JWT
+const collabRole = urlParams.get('role') === 'viewer' ? 'viewer' : 'editor'
 
 // 每个浏览器标签页作为一个独立的"协作者"，用随机用户名区分光标
 // color 必须是 #RRGGBB 格式（yCursorPlugin 的 defaultSelectionBuilder 会拼 alpha 后缀，
@@ -42,6 +51,7 @@ const collabColors = [
 const collabUser = {
   name: `用户-${Math.floor(Math.random() * 1000)}`,
   color: collabColors[Math.floor(Math.random() * collabColors.length)],
+  role: collabRole,
 }
 
 // 协同文档：URL 参数 ?doc=xxx 决定连到哪篇文档，同名 = 同一篇文档
@@ -51,10 +61,20 @@ const collabExtensions = []
 // 协同模式下编辑器需等 provider 首次同步完成后再挂载；单机模式立即可用
 const editorReady = ref(!collabEnabled)
 const collabError = ref('')
+// 协作者列表（协同模式由 awarenessChange 填充，单机模式空数组）
+const collaborators = ref([])
+// 提供给后代组件（状态栏头像组）的协同状态
+provide('collaborators', collaborators)
+provide('collabRole', collabRole)
 if (collabEnabled) {
   ydoc = new Y.Doc()
+  // 协同服务地址：由 utils/collab-config.js 在运行时解析
+  // 优先读 window.__UMO_COLLAB_URL__，未设置时兜底 ws://localhost:4000（dev）。
+  // 部署到生产时，业务页面在加载本脚本前设置该全局变量即可指向 wss:// 协同服务，
+  // 无需重新构建产物。见 collab-config.js。
+  const collabWsUrl = getCollabWsUrl()
   provider = new HocuspocusProvider({
-    url: 'ws://localhost:4000',
+    url: collabWsUrl,
     name: collabDoc, // 同名 = 同一篇文档，多人协作
     document: ydoc,
     // 同步节流：把 flushDelay 窗口内的多次编辑合并成一个 Yjs update 再广播。
@@ -66,7 +86,7 @@ if (collabEnabled) {
     // JWT 鉴权：从协同服务器的 /api/token 端点动态获取 token
     token: async () => {
       const res = await fetch(
-        `http://localhost:4000/api/token?name=${encodeURIComponent(collabUser.name)}&doc=${encodeURIComponent(collabDoc)}`,
+        `${getCollabTokenUrl()}?name=${encodeURIComponent(collabUser.name)}&doc=${encodeURIComponent(collabDoc)}&role=${collabRole}`,
       )
       const data = await res.json()
       return data.token
@@ -78,6 +98,14 @@ if (collabEnabled) {
   provider.on('synced', () => {
     console.log('[collab] 服务端首次同步完成，挂载编辑器')
     editorReady.value = true
+  })
+  // 协作者列表：监听 awareness 变化，维护当前文档的在线协作者（供状态栏头像组显示）
+  // awarenessChange 的 states 是 [{clientId, user:{name,color,role}}, ...]
+  provider.on('awarenessChange', ({ states }) => {
+    collaborators.value = states
+  })
+  provider.on('awarenessUpdate', ({ states }) => {
+    collaborators.value = states
   })
   // 鉴权失败时显示错误，不挂载编辑器
   provider.on('authenticationFailed', ({ reason }) => {
@@ -112,6 +140,13 @@ if (collabEnabled) {
 }
 
 const editorRef = $ref(null)
+// 编辑器创建后：viewer 权限设为只读（前端体验优化，服务端 readOnly 是双保险）
+const onEditorCreated = ({ editor }) => {
+  if (collabEnabled && collabRole === 'viewer') {
+    editor.setEditable(false)
+    console.log('[collab] 当前为只读用户（viewer），编辑器已禁用编辑')
+  }
+}
 const remoteMentionUsers = [
   {
     id: 'remote-alice',

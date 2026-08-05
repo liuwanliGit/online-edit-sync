@@ -1,7 +1,7 @@
 # Umo Editor 协同编辑开发交接文档
 
 > 本文档供切换对话时使用，包含完整的项目背景、已完成工作、技术细节和后续计划。
-> 最后更新：多文档编辑完成后
+> 最后更新：undo/redo 修复 + 光标样式修复 + 同步节流 + 协作者图例与权限控制完成后
 
 ---
 
@@ -28,6 +28,7 @@ npm run dev
 # 单机模式：http://localhost:9000/umo-editor/
 # 协同模式（默认文档）：http://localhost:9000/umo-editor/?collab=1
 # 多文档协同：http://localhost:9000/umo-editor/?collab=1&doc=my-doc
+# 只读模式（权限控制）：http://localhost:9000/umo-editor/?collab=1&doc=my-doc&role=viewer
 ```
 
 ---
@@ -38,19 +39,22 @@ npm run dev
 
 | 功能 | 状态 | 说明 |
 |---|---|---|
-| 内容实时同步 | ✅ 完成 | 阶段一，多窗口实时同步编辑 |
-| 远程光标/选区显示 | ✅ 完成 | 彩色竖线 + 用户名标签 + 选区背景色 |
+| 内容实时同步 | ✅ 完成 | 阶段一，多窗口实时同步编辑，80ms 节流合并 |
+| 远程光标/选区显示 | ✅ 完成 | 彩色竖线 + 用户名标签 + 选区背景色（CSS 已修复，见第四节坑#8） |
 | JWT 鉴权 | ✅ 完成 | HS256，服务端验证 + 文档级权限校验 |
 | 数据库持久化 | ✅ 完成 | SQLite（WAL 模式），重启不丢数据 |
 | 多文档编辑 | ✅ 完成 | URL 参数 `?doc=xxx` 指定文档，互不干扰 |
 | 撤销/重做 | ⚠️ undo 已修复 / redo 部分可用 | undo 已工作，redo 栈被清空（见第七节） |
+| 协作者图例 | ✅ 完成 | 状态栏头像组 + hover 详情浮层（用户名/颜色/权限） |
+| 编辑/只读权限 | ✅ 完成 | JWT role + 服务端 readOnly + 前端 setEditable 三重保障 |
+| 同步节流 | ✅ 完成 | flushDelay 80ms，连续输入合并成单个 Yjs update |
 
 ### 三阶段规划
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | **阶段一** | 最小协同服务 + 前端接入验证 | ✅ 完成 |
-| **阶段二** | 准生产：光标 UI、JWT 鉴权、数据库持久化、多文档 | ✅ 基本完成（撤销/重做除外） |
+| **阶段二** | 准生产：光标 UI、JWT 鉴权、数据库持久化、多文档、权限、图例 | ✅ 基本完成（redo 遗留） |
 | **阶段三** | 生产：多实例扩展、Redis 广播、监控告警 | ⬜ 待实现 |
 
 ---
@@ -75,8 +79,11 @@ collab-server/
 
 **server.js 要点**（当前版本）：
 - 用 `Server`（Hocuspocus 单例，**非构造函数**，用 `server.configure({...})` 配置）
-- `onRequest`：HTTP token 签发端点 `GET /api/token?name=xxx&doc=xxx`（同端口 4000 提供 WebSocket + HTTP）
-- `onAuthenticate`：JWT 验证（`jwt.verify`）+ 文档级权限校验（token 的 doc claim 必须匹配 documentName）
+- `onRequest`：HTTP token 签发端点 `GET /api/token?name=xxx&doc=xxx&role=editor|viewer`（同端口 4000 提供 WebSocket + HTTP）
+  - role 写入 JWT claims，响应里返回 role 供前端使用
+- `onAuthenticate`：JWT 验证（`jwt.verify`）+ 文档级权限校验（token 的 doc claim 必须匹配 documentName）+ 权限控制
+  - **权限控制**：`payload.role === 'viewer'` 时设 `connection.readOnly = true`（Hocuspocus 原生支持，服务端拒绝该连接的所有 update）
+  - context.user 写入 `{name, doc, role}`
 - `onLoadDocument` / `onStoreDocument`：通过 `storage.js` 的 `loadDoc`/`saveDoc` 读写 SQLite（Hocuspocus 自带 2s 防抖）
 - 优雅停机：SIGINT/SIGTERM → `server.destroy()` + `closeDb()`
 
@@ -106,23 +113,26 @@ collab-server/
 
 ### 3.3 `src/app.vue`（dev 入口，协同模式开关）
 
-**核心设计**：URL 参数 `?collab=1` 切换协同/单机模式，`?doc=xxx` 指定文档名。**单机模式完全不受影响**。
+**核心设计**：URL 参数 `?collab=1` 切换协同/单机模式，`?doc=xxx` 指定文档名，`?role=viewer` 指定只读。**单机模式完全不受影响**。
 
 当前改动点：
-- **import**：`Collaboration`、`Extension`（@tiptap/core）、`yCursorPlugin`（@tiptap/y-tiptap）、`HocuspocusProvider`、`Y`、`onUnmounted`、`ref`
+- **import**：`Collaboration`、`Extension`（@tiptap/core）、`yCursorPlugin`（@tiptap/y-tiptap）、`HocuspocusProvider`、`Y`、`onUnmounted`、`provide`、`ref`
 - **`collabEnabled`**：`urlParams.has('collab')`
 - **`collabDoc`**：`urlParams.get('doc') || 'demo-doc'`（多文档支持）
-- **`collabUser`**：随机用户名 + 从预设 hex 色池随机选颜色（**color 必须是 `#RRGGBB` 格式**，yCursorPlugin 的 `defaultSelectionBuilder` 会拼 alpha 后缀并正则校验）
+- **`collabRole`**：`urlParams.get('role') === 'viewer' ? 'viewer' : 'editor'`（权限，demo 阶段用 URL 参数，生产接业务系统鉴权）
+- **`collabUser`**：随机用户名 + 从预设 hex 色池随机选颜色 + role（**color 必须是 `#RRGGBB` 格式**，yCursorPlugin 的 `defaultSelectionBuilder` 会拼 alpha 后缀并正则校验）
 - **`editorReady`**：协同模式默认 `false`，等 `provider.on('synced')` 后置 `true`
 - **`collabError`**：鉴权失败时显示错误信息
 - **provider 连接**：`ws://localhost:4000`，文档名 `collabDoc`
-- **token**：异步函数 `async () => fetch('/api/token?name=...&doc=...')`（JWT 动态获取）
+- **`flushDelay: 80`**：provider 配置项，80ms 节流窗口，把连续编辑合并成单个 Yjs update（见 6.5 节）
+- **token**：异步函数 `async () => fetch('/api/token?name=...&doc=...&role=...')`（JWT 动态获取，带 role）
 - **`provider.on('authenticationFailed')`**：显示鉴权错误，不挂载编辑器
+- **协作者列表**：`provider.on('awarenessChange', ({states}) => collaborators.value = states)`，`provide('collaborators', collaborators)` + `provide('collabRole', collabRole)` 供状态栏 inject
+- **`@created="onEditorCreated"`**：viewer 权限时 `editor.setEditable(false)`（前端禁编辑，服务端 readOnly 是双保险）
 - **预填充段落（关键修复）**：创建 Collaboration 前，给 `ydoc.getXmlFragment('default')` push 一个 `new Y.XmlElement('paragraph')`——修复初始化竞争（见第五节）
-- **`collabExtensions`**：注入 3 个扩展：
+- **`collabExtensions`**：注入 2 个扩展：
   1. `Collaboration.configure({ document: ydoc })` — Yjs 同步
   2. `collaborationCursor`（Extension.create + `yCursorPlugin(provider.awareness)`）— 远程光标/选区
-  3. （undo/redo 的修复扩展当前未注入，见第七节）
 - **`disableExtensions`**：协同模式 `['undoRedo']`
 - **`document.content`**：协同模式留空（`''`），由 Y.Doc 驱动
 - **`onSave`**：协同模式跳过 localStorage
@@ -142,21 +152,31 @@ if (disableExtensions?.length) {
 }
 ```
 
-### 3.5 撤销/重做的 Umo 层改动（已完成，等上游 bug 修复后即生效）
+### 3.5 撤销/重做的 Umo 层改动（undo 已修复，redo 部分可用）
 
-以下 5 个文件的改动逻辑正确，一旦 y-tiptap 的上游 bug 修复就能生效：
+以下文件涉及 undo/redo，详见第七节（含根因和修复）：
 
 | 文件 | 改动 |
 |---|---|
 | `src/utils/history-record.js` | `addHistory` 增加 `isCollab` 参数，协同模式 editor 类型短路（不依赖 `state.history$`） |
 | `src/components/editor/index.vue` | `onUpdate` 传入 `isCollab` 标志 |
-| `src/components/index.vue` | `undoHistory`/`redoHistory` 协同分流（editor 走 Yjs undo，page 走 Umo 队列）+ `collabCanUndo`/`collabCanRedo` 响应式状态（在 `editor.on('transaction')` 里用 `editor.can().undo()` 刷新） |
+| `src/components/index.vue` | `undoHistory`/`redoHistory` 协同分流（editor 走 Yjs undo，page 走 Umo 队列）+ `collabCanUndo`/`collabCanRedo` 响应式状态 + `collabUndoManager`（直接调 `um.undo()/redo()` 绕过坏命令）+ **trackedOrigins 多副本修复**（`beforeTransaction` 捕获实际 origin）|
 | `src/components/menus/toolbar/base/undo.vue` | disabled 绑定协同分流（`isCollab ? !collabCanUndo : historyRecords.done.length === 0`） |
 | `src/components/menus/toolbar/base/redo.vue` | 同上 |
 
-### 3.6 `src/assets/styles/editor.less`（远程光标样式）
+### 3.6 `src/assets/styles/editor.less`（远程光标样式 + 协作者头像组）
 
-新增 `.ProseMirror-yjs-cursor`（光标竖线 + 悬停用户名气泡）和 `.ProseMirror-yjs-selection`（选区背景）样式。
+- `.ProseMirror-yjs-cursor`（光标竖线 + 悬停用户名气泡）和 `.ProseMirror-yjs-selection`（选区背景）样式
+  - **注意**：这两段样式必须放在 `.umo-editor-content` 直接作用域下，**不能嵌套进 `:-webkit-any(article, aside, nav, section)` 块**——否则光标 span 的祖先是 `.ProseMirror/p`（非 article 等），选择器匹配不上，导致 opacity/position 失效，用户名 div 会以 block + opacity:1 渲染占满一整行（见第四节坑#8）
+- `.umo-collaborators`（状态栏协作者头像组）和 `.umo-collaborators-panel`（hover 详情浮层）样式
+
+### 3.7 `src/components/statusbar/index.vue`（协作者头像组 UI）
+
+在状态栏**左区末尾**（字数统计/版权之后、右区视图工具之前）插入协作者头像组：
+- `v-if="isCollab && collaboratorList.length > 0"`，仅协同模式且有人在线时显示
+- 彩色头像圆圈（首字母 + user.color 背景）+ 超过 5 人显示 +N，层叠排列
+- `t-popup`（trigger=hover, placement=top-left）包裹，浮层列出所有协作者：彩色圆点 + 用户名 + 权限标签（编辑/只读）
+- inject `collaborators`（app.vue provide）+ `isCollab` 判断 + `collaboratorList` 计算属性（过滤无效项）
 
 ---
 
@@ -170,7 +190,10 @@ if (disableExtensions?.length) {
 | 4 | `Unexpected case`（第二次，升级后复发） | 初始化竞争（见第五节） | 预填充段落 |
 | 5 | `ERR_HTTP_HEADERS_SENT`（onRequest hook） | Hocuspocus 的 `onRequest` 执行后总是走默认响应 | 处理完 HTTP 后 `throw null`（falsy 值跳过默认处理） |
 | 6 | 光标颜色不显示/选区背景无效 | `collabUser.color` 用了 `hsl()` 格式，yCursorPlugin 要求 `#RRGGBB` | 改为预设 hex 色池 |
-| 7 | 协同模式撤销/重做不工作 | y-tiptap 两个上游 bug（见第七节） | 已诊断，待修复 |
+| 7 | 协同模式撤销/重做不工作 | **undo 已修复**：trackedOrigins 多副本（见第七节）+ extension-collaboration preventDispatch；**redo 仍遗留** | undo 修复见第七节；redo 待处理 |
+| 8 | 协作者用户名占满一整行（带背景色） | 光标 CSS 被错误嵌套进 `:-webkit-any(article,aside,nav,section)` 块，选择器匹配不上光标 DOM，opacity/position 失效 | 把 `.ProseMirror-yjs-cursor` 移到 `.umo-editor-content` 直接作用域（见 3.6） |
+| 9 | `yUndoPluginKey.getState()` 返回 undefined | 用 `new PluginKey('y-undo')` 重建 key——ProseMirror 的 createKey 是模块级计数器，重建得 `y-undo$1` 而真正注册的是 `y-undo$` | 必须 `import { yUndoPluginKey } from '@tiptap/y-tiptap'` 用同一实例 |
+| 10 | Tiptap 命令（insertContent 等）在协同模式不改 doc | Tiptap 3.x 命令系统与协同模式兼容问题（preventDispatch 家族），但 PM 原生 `view.dispatch(tr)` 正常 | undo 走 `um.undo()` 绕过；真实键盘输入走 PM 原生 dispatch 不受影响 |
 
 ---
 
@@ -261,6 +284,42 @@ if (fragment.length === 0) {
 
 **并发容量**：单实例典型场景（5-20 人/篇）完全够用。awareness 广播的 O(N²) 复杂度是瓶颈——100+ 人/篇需阶段三的多实例 + Redis。SQLite 写入不构成限制（防抖后写频率极低）。
 
+### 6.5 同步节流（flushDelay 80ms）
+
+**配置**：`HocuspocusProvider` 的 `flushDelay: 80` 选项。
+
+**机制**（provider 源码 `documentUpdateHandler`）：
+- 每个 Yjs update 进 `pendingUpdates` 队列
+- `scheduleFlush` 设 80ms 定时器（连续输入时不重设，一个窗口内多个按键都被合并）
+- 定时器触发时 `Y.mergeUpdates(pendingUpdates)` 合并成**一个** update 再 `send`
+- awareness（光标）走同样的节流，内容与光标体验一致
+
+**为什么选 80ms**：低于人眼感知阈值（~100ms），连续打字每键间隔约 125-200ms，80ms 能合并连续输入，包数量减少 60-80%。
+
+**关闭节流**：不设 `flushDelay`（默认），每个按键立即发一个包（0ms 应用层延迟，但高频输入时包数量大）。
+
+**同步延迟实测**（localhost）：约 5-15ms（应用层 0ms + 网络 1-5ms + 服务端转发 1ms + B 端渲染 1-5ms）。
+
+### 6.6 协作者图例与权限控制
+
+**协作者图例**（状态栏头像组）：
+- 数据源：`provider.on('awarenessChange', ({states}) => ...)`，states 是 `[{clientId, user:{name,color,role}}]`
+- app.vue（根组件）`provide('collaborators', collaborators)`，statusbar `inject('collaborators')` 渲染
+- UI：状态栏左区末尾，彩色头像圆圈（首字母 + color 背景）层叠排列，hover 弹出详情浮层（用户名 + 权限标签）
+- 位置在字数统计/版权之后、右区视图工具（全屏/缩放/语言）之前——"文档状态"信息归在左半边
+
+**编辑/只读权限**（三重保障）：
+```
+URL ?role=viewer
+  → JWT claims 带 role:viewer（/api/token?role=viewer）
+  → 服务端 connection.readOnly = true（强制：Hocuspocus 拒绝该连接的 update）
+  → 前端 editor.setEditable(false)（体验：编辑器 contenteditable=false）
+  → awareness user.role='viewer'（显示：图例标签"只读"，灰色）
+```
+- **服务端 readOnly 是权威**：即使前端被绕过，Hocuspocus 的 `MessageReceiver`（server dist line 1415/1447）会拒绝 readOnly 连接的 update
+- **awareness 的 role 是客户端自报**：可篡改，但只影响图例显示，不影响实际权限（实际权限由服务端强制）
+- demo 阶段用 URL 参数测，生产环境 `/api/token` 端点接业务系统鉴权，由业务系统决定每个用户的 role
+
 ---
 
 ## 七、撤销/重做：已修复 undo，redo 仍有边界问题
@@ -324,18 +383,26 @@ if (fragment.length === 0) {
 
 ---
 
-## 八、待实现功能（阶段三）
+## 八、待实现功能（阶段三 + 遗留）
+
+### 遗留（阶段二未完成）
 
 | 功能 | 说明 |
 |---|---|
-| 撤销/重做 | 见第七节，卡在上游 bug |
+| 协同 redo（重做） | undo 后 redo 栈被清空（见第七节"redo 遗留问题"）。推测原因：undo 产生的 ydoc 事务触发 `_typeChanged` 重建 PM，又触发 `_prosemirrorChanged` 新事务，UndoManager 误判为"新编辑"清空 redo 栈。可能修复方向：在 `_typeChanged` 触发的事务上标记 origin 为 UndoManager |
+| 权限管理 UI | 当前权限由 URL 参数 `?role=` 指定（demo 用）。生产需加邀请/权限表管理界面（SQLite 加 permissions 表，或接业务系统） |
+| 用户颜色唯一性 | 当前 8 色随机分配，人多会撞色。可改用用户 ID 哈希生成颜色 |
+
+### 阶段三（生产化）
+
+| 功能 | 说明 |
+|---|---|
 | 多实例扩展 | `@hocuspocus/extension-redis` 跨节点广播 |
 | 高可用 | K8s + liveness probe + 优雅停机 |
 | 监控 | Prometheus 指标（连接数/房间数/合并耗时） |
 | 限流/防滥用 | 单房间人数上限、速率限制 |
-| 只读模式 | `onAuthenticate` 里 `connection.readOnly = true`（Hocuspocus 已支持） |
-| awareness 节流 | 光标更新节流（降低 O(N²) 广播量），提升大并发体验 |
-| 业务系统对接 | JWT 签发端点接业务系统鉴权（当前无保护） |
+| 业务系统对接 | JWT 签发端点 `/api/token` 接业务系统鉴权（当前无保护，任何人可签 token） |
+| 向 tiptap 报 issue | Bug B（preventDispatch）+ trackedOrigins 多副本 + Tiptap 命令协同不兼容，都有精确诊断证据 |
 
 ---
 
@@ -346,23 +413,26 @@ if (fragment.length === 0) {
 │  浏览器 A    │ ────────────► │                             │
 │ ?collab=1    │ ◄──────────── │  Hocuspocus (Node.js:4000)  │
 │ &doc=xxx     │   Yjs 二进制   │                             │
-│ Umo Editor   │                │  onAuthenticate (JWT 验证)   │
-│ + Collab扩展 │                │  onLoadDocument (SQLite 读) │
-│ + Cursor扩展 │                │  onStoreDocument (SQLite 写)│
-│ + 光标样式    │                │  onRequest (/api/token 签发)│
+│ (editor)     │   flushDelay   │  onAuthenticate:            │
+│ Umo Editor   │   80ms 合并    │    JWT 验证 + 文档级权限     │
+│ + Collab扩展 │                │    + role→readOnly (viewer) │
+│ + Cursor扩展 │                │  onLoadDocument (SQLite 读) │
+│ + 光标样式    │                │  onStoreDocument (SQLite 写)│
+│ + 状态栏头像组│                │  onRequest (/api/token 签发)│
 └──────────────┘                │                             │
 ┌──────────────┐   WebSocket    │  ┌─────────────────────┐   │
 │  浏览器 B    │ ────────────► │  │  storage.js         │   │
 │ ?collab=1    │ ◄──────────── │  │  loadDoc/saveDoc    │   │
 │ &doc=xxx     │                │  │  ↓                  │   │
-│ （同文档=A）  │                │  │  SQLite (WAL 模式)  │   │
-└──────────────┘                │  │  data/collab.db    │   │
-┌──────────────┐                │  └─────────────────────┘   │
-│  浏览器 C    │ ────────────► │                             │
-│ ?collab=1    │                │  Hocuspocus 防抖：          │
-│ &doc=yyy     │                │  debounce 2s / maxDebounce  │
-│ （不同文档）  │                │  10s / 断开立即 flush       │
-└──────────────┘                └─────────────────────────────┘
+│ &role=viewer │                │  │  SQLite (WAL 模式)  │   │
+│ (只读,setEdit│                │  │  data/collab.db    │   │
+│  able=false) │                │  └─────────────────────┘   │
+└──────────────┘                │                             │
+                                │  Hocuspocus 防抖：          │
+                                │  debounce 2s / maxDebounce  │
+                                │  10s / 断开立即 flush       │
+                                │  provider flushDelay 80ms   │
+                                └─────────────────────────────┘
 ```
 
 ---
@@ -379,6 +449,10 @@ if (fragment.length === 0) {
 8. **collabUser.color 必须是 `#RRGGBB`**：hsl/rgb 格式会导致选区背景色无效。
 9. **Hocuspocus 前后端版本不对齐**：前端 `@hocuspocus/provider` 4.4.0，服务端 `@hocuspocus/server` 2.15.3。当前 token 协议兼容，但建议后续对齐。
 10. **better-sqlite3 是原生模块**：Windows 上用预编译二进制，无需 node-gyp。换 Node 版本可能需 rebuild（`npm rebuild better-sqlite3`）。
+11. **yUndoPluginKey 必须 import 不能 new**：取 undoManager 要 `import { yUndoPluginKey } from '@tiptap/y-tiptap'` 用同一实例，不能 `new PluginKey('y-undo')` 重建（createKey 计数器会得 `y-undo$1`，getState 返回 undefined）。
+12. **光标 CSS 不能嵌套进 `:-webkit-any` 块**：`.ProseMirror-yjs-cursor` 必须在 `.umo-editor-content` 直接作用域下，否则选择器匹配不上，opacity/position 失效导致用户名占行（见第四节坑#8）。
+13. **Vite 改 node_modules 源文件不生效**：Vite 用 `node_modules/.vite/deps/` 预构建缓存，改 `node_modules/@tiptap/y-tiptap/dist/y-tiptap.js` 后必须删 `.vite/deps` 并重启 dev server（`--force`）才会重新预构建。
+14. **trackedOrigins 多副本是 undo 的核心坑**：协同模式下 undoManager 的 trackedOrigins 里的 ySyncPluginKey 与事务实际用的不是同一实例（Vite 预构建导致），需在 `beforeTransaction` 捕获实际 origin 补登记（见第七节修复内容）。
 
 ---
 
@@ -386,12 +460,43 @@ if (fragment.length === 0) {
 
 在新对话里可以这样开头：
 
-> "我在给 Umo Editor（D:\workspace\editor）做协同编辑。阶段二核心功能（光标、JWT、SQLite 持久化、多文档）已完成。请看 COLLAB_HANDOFF.md 了解全部背景。接下来要做 [具体任务]。"
+> "我在给 Umo Editor（D:\workspace\editor）做协同编辑。阶段二核心功能（光标、JWT、SQLite 持久化、多文档、undo、协作者图例、权限控制）已完成。请看 COLLAB_HANDOFF.md 了解全部背景。接下来要做 [具体任务]。"
 
 常见接续任务：
-- "继续做撤销/重做" → 第七节（卡在两个上游 bug，需研究 yjs 嵌套事务或报 issue）
+- "修复协同 redo" → 第七节"redo 遗留问题"（undo 后 redo 栈被清空，需研究 `_typeChanged` 触发的事务如何避免清栈）
+- "做权限管理 UI" → 第八节（当前权限由 URL `?role=` 指定，需加邀请/权限表界面）
 - "做 Redis 多实例广播" → 第八节（阶段三）
-- "做只读模式" → 第八节（`connection.readOnly = true`）
-- "优化大并发性能" → 第八节（awareness 节流）
+- "优化大并发性能" → awareness 广播 O(N²) 是瓶颈，需多实例 + Redis（阶段三）
+- "向 tiptap 报 issue" → 第八节（preventDispatch + trackedOrigins 多副本 + Tiptap 命令协同不兼容，都有诊断证据）
 - "切到 MySQL/PostgreSQL" → 替换 `collab-server/storage.js`，保持 `loadDoc`/`saveDoc`/`closeDb` 签名
 - "验证 columns/callout 等节点的协同兼容性" → 逐个测试 Umo 自定义扩展
+
+### 当前所有改动文件清单（`git diff --stat`）
+
+```
+COLLAB_HANDOFF.md                       # 本文档
+collab-server/server.js                 # token 端点加 role + onAuthenticate 设 readOnly
+src/app.vue                             # role/collaborators/flushDelay/provide/setEditable
+src/assets/styles/editor.less           # 光标 CSS 修复（移出 :-webkit-any）+ 协作者头像组样式
+src/components/editor/index.vue         # onUpdate 传 isCollab
+src/components/index.vue                # undoManager 取出 + trackedOrigins 修复 + undoHistory 协同分流
+src/components/menus/toolbar/base/undo.vue   # 协同 disabled 绑定
+src/components/menus/toolbar/base/redo.vue   # 协同 disabled 绑定
+src/components/statusbar/index.vue      # 协作者头像组 UI
+src/utils/history-record.js             # addHistory 协同短路
+```
+
+### 启动验证（3 个终端）
+
+```bash
+# 终端 1：协同服务
+cd D:\workspace\editor\collab-server && npm start   # 端口 4000
+
+# 终端 2：前端
+cd D:\workspace\editor && npm run dev               # 端口 9000
+
+# 浏览器测试：
+# 两个编辑者：开两个 ?collab=1&doc=test 窗口
+# 一编辑一只读：A 用 ?collab=1&doc=test，B 用 ?collab=1&doc=test&role=viewer
+# 观察：状态栏左区出现协作者头像组，hover 看权限标签，viewer 无法编辑
+```

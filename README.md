@@ -97,6 +97,49 @@ The dev server runs at `http://localhost:9000/umo-editor` (the `base` is set to 
 
 > **Note**: The library is published as `@umoteam/editor`. If you only want to **use** Umo Editor in your own project, you do not need to run this repo — see the [Example Project](#example-project) and [Documentation](https://dev.umodoc.com/en/docs/editor) instead.
 
+## Collaborative Editing (Real-time Multi-user)
+
+This repo ships a built-in collaborative editing implementation based on **Yjs + Hocuspocus** (work in progress), located in the [`collab-server/`](./collab-server/) subdirectory. It supports real-time sync, remote cursors, JWT authentication, SQLite persistence, multi-document isolation, and editor/viewer (read-only) permission control. Standalone mode is unaffected by default — collaboration is only enabled when the URL carries `?collab=1`.
+
+### Local Development (two terminals)
+
+```bash
+# Terminal 1: collaboration server (port 4000)
+cd collab-server
+npm install        # first run
+npm start
+
+# Terminal 2: frontend dev server (port 9000)
+npm run dev
+```
+
+Open in the browser (standalone mode does not need the collab server):
+
+```
+# Collaboration mode (default document)
+http://localhost:9000/umo-editor/?collab=1
+# Multi-document collaboration
+http://localhost:9000/umo-editor/?collab=1&doc=my-doc
+# Read-only (viewer) mode
+http://localhost:9000/umo-editor/?collab=1&doc=my-doc&role=viewer
+```
+
+### Build & Deploy
+
+```bash
+# 1. Build the frontend (outputs to dist/)
+npm install
+npm run build
+
+# 2. Deploy the collab server (pure Node service, no build step)
+cd collab-server
+npm install --omit=dev
+mkdir -p data
+JWT_SECRET="<strong-random-secret>" PORT=4000 node server.js
+```
+
+In production, run the collab server under PM2 or Docker, have the frontend connect via `wss://`, and reverse-proxy it to the service's port 4000 with Nginx. For full deployment steps, PM2/Docker configs, reverse-proxy examples, and how to swap the database, see [`collab-server/README.md`](./collab-server/README.md). For the complete design background and known pitfalls, see [`COLLAB_HANDOFF.md`](./COLLAB_HANDOFF.md).
+
 ## Documentation
 
 Please visit [Documentation](https://dev.umodoc.com/en/docs/editor) for detailed instructions.

@@ -100,6 +100,51 @@ npm run build
 
 > **提示**：本组件库以 `@umoteam/editor` 的名称发布到 npm。如果你只是想在项目中**使用** Umo Editor，无需运行本仓库，请直接参考[示例项目](#示例项目)和[开发文档](https://dev.umodoc.com/cn/docs/editor)。
 
+## 协同编辑（多人实时协作）
+
+本仓库内置一套基于 **Yjs + Hocuspocus** 的协同编辑实现（开发中），位于 [`collab-server/`](./collab-server/) 子目录。支持多人实时同步、远程光标、JWT 鉴权、SQLite 持久化、多文档隔离与编辑/只读权限控制。单机模式默认不受影响，仅当 URL 带上 `?collab=1` 时才进入协同模式。
+
+### 本地联调（两个终端）
+
+```bash
+# 终端 1：协同服务（端口 4000）
+cd collab-server
+npm install        # 首次
+npm start
+
+# 终端 2：前端 dev server（端口 9000）
+cd D:\workspace\editor
+npm run dev
+```
+
+浏览器访问（单机模式无需启动协同服务）：
+
+```
+# 协同模式（默认文档）
+http://localhost:9000/umo-editor/?collab=1
+# 多文档协同
+http://localhost:9000/umo-editor/?collab=1&doc=my-doc
+# 只读模式
+http://localhost:9000/umo-editor/?collab=1&doc=my-doc&role=viewer
+```
+
+### 打包部署
+
+```bash
+# 1. 前端构建（产物输出到 dist/）
+cd D:\workspace\editor
+npm install
+npm run build
+
+# 2. 协同服务部署（纯 Node 服务，无需构建）
+cd collab-server
+npm install --omit=dev
+mkdir -p data
+JWT_SECRET="<强随机密钥>" PORT=4000 node server.js
+```
+
+协同服务建议用 PM2 或 Docker 常驻运行，生产环境前端通过 `wss://` 连接并用 Nginx 反代到本服务的 4000 端口。完整的部署步骤、PM2/Docker 配置、反向代理示例与数据库切换方式见 [`collab-server/README.md`](./collab-server/README.md)；完整的设计背景与踩坑记录见 [`COLLAB_HANDOFF.md`](./COLLAB_HANDOFF.md)。
+
 ## 开发文档
 
 请访问[https://dev.umodoc.com/cn/docs/editor](https://dev.umodoc.com/cn/docs/editor)。

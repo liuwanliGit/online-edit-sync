@@ -886,3 +886,89 @@
     pointer-events: none;
   }
 }
+
+// ==================== 协作者头像组（状态栏） ====================
+.umo-collaborators {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  // 相邻头像层叠：从第二个起向左偏移，形成飞书/Google Docs 风格的叠加效果
+  .umo-collaborator-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 24px;
+    text-align: center;
+    border: 2px solid var(--umo-status-bar-bg, #fff);
+    box-sizing: border-box;
+    &:not(:first-child) {
+      margin-left: -8px;
+    }
+  }
+  .umo-collaborator-more {
+    margin-left: -8px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #bbb;
+    color: #fff;
+    font-size: 10px;
+    line-height: 24px;
+    text-align: center;
+    border: 2px solid var(--umo-status-bar-bg, #fff);
+    box-sizing: border-box;
+  }
+}
+
+// 协作者详情浮层（t-popup content）
+.umo-collaborators-panel {
+  min-width: 180px;
+  padding: 4px 0;
+  &-title {
+    padding: 4px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #333;
+  }
+  &-hint {
+    padding: 0 12px 8px;
+    font-size: 11px;
+    color: #999;
+  }
+  &-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    &:hover {
+      background: #f5f5f5;
+    }
+  }
+  &-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  &-name {
+    flex: 1;
+    font-size: 13px;
+    color: #333;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  &-role {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--umo-primary-color, #4880ff);
+    color: #fff;
+    &.is-viewer {
+      background: #bbb;
+    }
+  }
+}
