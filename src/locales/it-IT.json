@@ -434,6 +434,13 @@
       "message": "Prima di esportare il documento PDF, assicurati che tutte le immagini nelle pagine siano caricate. Poi, nella finestra di stampa, seleziona 'Stampante - Salva come PDF' e clicca 'Salva'. Per garantire che tutto il contenuto sia mostrato correttamente, attiva l'opzione 'Grafica di sfondo' nella finestra di stampa e imposta i 'Margini' su 'Nessuno'.",
       "confirm": "Ho capito"
     },
+    "word": {
+      "text": "Word",
+      "error": {
+        "title": "Esportazione fallita",
+        "message": "Esportazione del documento Word fallita. Assicurati che il servizio di esportazione sia configurato e riprova."
+      }
+    },
     "text": "Testo"
   },
   "list": {

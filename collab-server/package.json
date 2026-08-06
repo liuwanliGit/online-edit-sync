@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@hocuspocus/server": "^2.13.0",
-    "better-sqlite3": "^13.0.2",
+    "better-sqlite3": "^11.10.0",
     "jsonwebtoken": "^9.0.3",
     "yjs": "13.6.29"
   },

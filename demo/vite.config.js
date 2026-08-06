@@ -10,6 +10,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // 显式指向已构建产物，避免 npm file:.. 解析 / exports 条件在不同环境下不一致
+      '@umoteam/editor/style': fileURLToPath(new URL('./node_modules/@umoteam/editor/dist/umo-editor.css', import.meta.url)),
+      '@umoteam/editor': fileURLToPath(new URL('./node_modules/@umoteam/editor/dist/umo-editor.js', import.meta.url)),
     },
     // 关键：编辑器 bundle 把 @tiptap/* / prosemirror-* / yjs 等外部化了，
     // 运行时由宿主（本 demo）提供。本 demo 的协同代码也直接 import 这些包，

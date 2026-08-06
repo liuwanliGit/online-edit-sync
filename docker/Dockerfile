@@ -7,9 +7,10 @@
 #   3. runner          ：运行时镜像（nginx + supervisor + 2 个 node 服务）
 #
 # 对外端口 9999（nginx），容器内：
-#   nginx         → 静态资源 + 反代
-#   collab-server → :4000（Yjs 协同 WebSocket + /api/token）
-#   demo-server   → :4001（文档元数据 REST）
+#   nginx           → 静态资源 + 反代
+#   collab-server   → :4000（Yjs 协同 WebSocket + /api/token）
+#   demo-server     → :4001（文档元数据 REST）
+#   convert-server  → :4002（HTML → .docx 格式转换）
 # =============================================================================
 
 
@@ -41,18 +42,22 @@ FROM crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/node:22-boo
 
 WORKDIR /build/demo
 
-# demo 通过 file:.. 引用上层仓库的 dist/，因此需把编辑器库产物放进 demo/node_modules 对应位置
-# 先放 demo 自身元信息
+# demo 通过 file:.. 引用上层仓库的编辑器库。但 npm install 在解析 file:.. 时会
+# 读取上层 package.json 的 dependencies/devDependencies 并尝试安装上层整棵依赖树，
+# 在 slim 镜像里触发脚本 bin 链接失败（exit 127）。
+# 解决：install 时先移除 @umoteam/editor 这一行，正常装其余依赖；然后手动把
+# Stage 1 构建好的 dist/ + package.json 放进 node_modules/@umoteam/editor，
+# vite/vite build 通过包名即可解析。
 COPY demo/package.json demo/package-lock.json ./
 
-# 放编辑器库（package.json + 刚构建的 dist/），让 demo 的 file:.. 能解析
-COPY package.json /build/package.json
-# 注意：必须放在 demo/node_modules/@umoteam/editor 的位置，npm 才会把 file:.. 解析到它
-# 但 file:.. 指向上层目录（/build），npm install 时会把 /build 安装到 node_modules/@umoteam/editor
-# 所以上层 package.json + dist 必须在 /build 下
-COPY --from=editor-builder /build/dist /build/dist
+# install 前剔除 file:.. 依赖，避免 npm 深入上层仓库
+RUN node -e "const f='package.json';const p=JSON.parse(require('fs').readFileSync(f,'utf8'));delete p.dependencies['@umoteam/editor'];require('fs').writeFileSync(f,JSON.stringify(p,null,2))" \
+    && npm install --ignore-scripts --no-package-lock
 
-RUN npm install --ignore-scripts
+# 放入编辑器库产物（已构建好的 ESM bundle）
+RUN mkdir -p node_modules/@umoteam/editor
+COPY package.json ./node_modules/@umoteam/editor/package.json
+COPY --from=editor-builder /build/dist ./node_modules/@umoteam/editor/dist
 
 # demo 源码 + 配置
 COPY demo/index.html demo/vite.config.js ./
@@ -67,7 +72,7 @@ RUN npm run build
 FROM crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/node:22-bookworm-slim AS runner
 
 # 装运行时依赖：nginx（反代入口）+ supervisor（进程管理）
-# better-sqlite3 自带 linux-x64 预编译二进制，无需 python/make/g++
+# better-sqlite3 通过 install 脚本（prebuild-install）下载预编译二进制，无需 python/make/g++
 RUN apt-get update \
     && apt-get install -y --no-install-recommends nginx supervisor ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -79,7 +84,9 @@ COPY collab-server/package.json collab-server/package-lock.json ./collab-server/
 COPY collab-server/server.js collab-server/storage.js ./collab-server/
 
 WORKDIR /app/collab-server
-RUN npm install --omit=dev --ignore-scripts
+# 注意：不能用 --ignore-scripts。better-sqlite3 的 install 脚本负责下载与当前 Node ABI
+# 匹配的预编译 .node 二进制（prebuild-install），跳过会导致运行时找不到原生模块。
+RUN npm install --omit=dev
 WORKDIR /app
 
 # ---------- 文档管理后端（demo/server）----------
@@ -87,7 +94,15 @@ COPY demo/server/package.json demo/server/package-lock.json ./demo/server/
 COPY demo/server/index.js ./demo/server/
 
 WORKDIR /app/demo/server
-RUN npm install --omit=dev --ignore-scripts
+RUN npm install --omit=dev
+WORKDIR /app
+
+# ---------- 文档转换服务（convert-server）----------
+COPY convert-server/package.json convert-server/package-lock.json ./convert-server/
+COPY convert-server/server.js ./convert-server/
+
+WORKDIR /app/convert-server
+RUN npm install --omit=dev
 WORKDIR /app
 
 # ---------- 前端静态资源 ----------

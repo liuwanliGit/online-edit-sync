@@ -538,6 +538,13 @@
       "message": "Before exporting the PDF document, please ensure that all images on the pages have finished loading. Then, in the pop-up print dialog, select 'Printer - Save as PDF', and click the 'Save' button. To ensure that all content is displayed correctly, please check the 'Background graphics' option in the print dialog box and set the 'Margins' to 'None.'",
       "confirm": "I Understand"
     },
+    "word": {
+      "text": "Word",
+      "error": {
+        "title": "Export Failed",
+        "message": "Failed to export the Word document. Please make sure the export service is configured and try again."
+      }
+    },
     "text": "Text"
   },
   "list": {

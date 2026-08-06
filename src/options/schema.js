@@ -724,6 +724,15 @@ export default new ObjectSchema({
     },
     required: false,
   },
+  onExportDocx: {
+    merge: 'replace',
+    validate(value) {
+      if (!isAsyncFunction(value)) {
+        throw new Error('Key "onExportDocx" must be a async function.')
+      }
+    },
+    required: false,
+  },
   onFileDelete: {
     merge: 'replace',
     validate(value) {

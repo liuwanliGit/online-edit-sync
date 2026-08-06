@@ -225,6 +225,7 @@
         <div class="umo-virtual-group">
           <menus-toolbar-export-image v-if="!disableMenu('export-image')" />
           <menus-toolbar-export-pdf v-if="!disableMenu('export-pdf')" />
+          <menus-toolbar-export-word v-if="!disableMenu('export-word')" />
           <menus-toolbar-export-text v-if="!disableMenu('export-text')" />
         </div>
         <div class="umo-virtual-group">

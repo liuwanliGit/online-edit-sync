@@ -43,3 +43,4 @@ pnpm-lock.yaml
 .DS_Store
 Thumbs.db
 .zcode/plans/
+online-edit-sync.tar

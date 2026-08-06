@@ -197,6 +197,11 @@ export default {
       reject(new Error('Key "onFileUpload": Please set the upload method'))
     })
   },
+  async onExportDocx() {
+    return await new Promise((_, reject) => {
+      reject(new Error('Key "onExportDocx": Please set the docx export method'))
+    })
+  },
   onFileDelete() {
     console.error(
       'The file has been deleted. Please configure the onFileDelete to completely delete the file from the server.',

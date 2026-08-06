@@ -1,0 +1,14 @@
+{
+  "name": "umo-convert-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Umo Editor 文档转换服务：把编辑器 HTML 内容转成 .docx。独立于 demo-server 与 collab-server，专注格式转换，不接触文档元数据与协同内容。",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "html-to-docx": "1.8.0"
+  }
+}

@@ -89,6 +89,8 @@ import {
 import { useToast } from '@/composables/useToast'
 import { auth, isViewer, isCollab } from '@/store/auth'
 import { get, update } from '@/store/documents'
+import { exportDocx } from '@/utils/api'
+import { saveAs } from 'file-saver'
 
 const route = useRoute()
 const router = useRouter()
@@ -223,6 +225,11 @@ const editorOptions = computed(() => {
       }
     }
     base.onFileDelete = () => {}
+  }
+  // Word 导出：两种模式共用，把 HTML 发给 convert-server 转 .docx 后下载
+  base.onExportDocx = async (html, title) => {
+    const blob = await exportDocx(html, title)
+    saveAs(blob, `${title || 'document'}.docx`)
   }
   return base
 })
