@@ -25,8 +25,9 @@ WORKDIR /build
 COPY package.json package-lock.json ./
 COPY src/ ./src/
 COPY public/ ./public/
-COPY types/ ./types/
 COPY vite.config.js ./
+# 注意：types/ 目录由 unplugin-auto-import / unplugin-vue-components 在构建时
+# 自动生成（imports.d.ts / components.d.ts），不再随源码提交，故不 COPY
 
 # 构建脚本需要 src/utils/copyright.js（已在 src/ 内）。
 # husky 的 prepare 钩子在容器内无意义，跳过。
