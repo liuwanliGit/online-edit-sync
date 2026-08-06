@@ -1,0 +1,43 @@
+# =============================================================================
+# Umo Editor 全栈单镜像编排
+# -----------------------------------------------------------------------------
+# 一键启动：docker compose -f docker/docker-compose.yml up -d --build
+# 访问：    http://localhost:9999
+#
+# 数据卷（持久化）：
+#   umo-collab-data → /app/collab-server/data （协同文档 Yjs 二进制）
+#   umo-docs-data   → /app/demo/server/data   （文档元数据）
+# =============================================================================
+
+services:
+  umo-editor:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: umo-editor:latest
+    container_name: umo-editor
+    ports:
+      - "9999:9999"
+    environment:
+      # JWT 密钥（HS256）。生产环境务必改成强随机值，可在 .env 或命令行覆盖
+      JWT_SECRET: ${JWT_SECRET:-umo-collab-secret-dev-only}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+    volumes:
+      # 协同内容（Yjs 文档二进制）
+      - umo-collab-data:/app/collab-server/data
+      # 文档元数据（id/title/createdBy/时间戳）
+      - umo-docs-data:/app/demo/server/data
+    restart: unless-stopped
+    healthcheck:
+      # 用 node 内联检查（镜像内一定有 node，无需额外装 curl）
+      test:
+        - "CMD-SHELL"
+        - "node -e \"fetch('http://127.0.0.1:9999/api/documents').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  umo-collab-data:
+  umo-docs-data:

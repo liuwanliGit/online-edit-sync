@@ -111,6 +111,17 @@ const collaborators = ref([])
 
 const mode = () => auth.user?.mode || 'standalone'
 
+// 把 File 转成 base64 Data URL，无需配置上传地址。
+// 返回的 dataURL 会直接写入文档：单机模式随 HTML 存进 localStorage，
+// 协同模式随 Yjs 文档同步给所有协作者，刷新/多端都不会失效。
+const fileToBase64 = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(reader.error || new Error('文件读取失败'))
+    reader.readAsDataURL(file)
+  })
+
 // 协作者光标颜色池（#RRGGBB，yCursorPlugin 要求 6 位 hex）
 const COLLAB_COLORS = [
   '#e06c75', '#56b6c2', '#c678dd', '#61afef',
@@ -180,9 +191,10 @@ const editorOptions = computed(() => {
     base.onSave = async () => '协同模式：内容由服务端实时保存'
     base.onFileUpload = async (file) => {
       if (!file) throw new Error('没有找到要上传的文件')
+      const base64 = await fileToBase64(file)
       return {
         id: `file-${Date.now()}`,
-        url: file.url || URL.createObjectURL(file),
+        url: base64,
         name: file.name,
         type: file.type,
         size: file.size,
@@ -201,9 +213,10 @@ const editorOptions = computed(() => {
     }
     base.onFileUpload = async (file) => {
       if (!file) throw new Error('没有找到要上传的文件')
+      const base64 = await fileToBase64(file)
       return {
         id: `file-${Date.now()}`,
-        url: file.url || URL.createObjectURL(file),
+        url: base64,
         name: file.name,
         type: file.type,
         size: file.size,

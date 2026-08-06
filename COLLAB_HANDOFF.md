@@ -1,7 +1,7 @@
 # Umo Editor 协同编辑开发交接文档
 
 > 本文档供切换对话时使用，包含完整的项目背景、已完成工作、技术细节和后续计划。
-> 最后更新：undo/redo 修复 + 光标样式修复 + 同步节流 + 协作者图例与权限控制完成后
+> 最后更新：demo 宿主应用（登录/文档列表/编辑器 + 单机/协同双模式 + 工具栏标题行布局 + 人员信息浮框）完成后
 
 ---
 
@@ -456,47 +456,207 @@ URL ?role=viewer
 
 ---
 
-## 十一、新对话快速接续指南
+## 十一、demo 宿主应用（`demo/` 子目录，独立 Vite 应用）
+
+> 这是一个**独立的宿主应用 demo**，展示如何把 `@umoteam/editor` 集成到真实业务里。完整流程：**登录页（用户名 + 角色 + 模式）→ 文档列表（新建/删除/打开）→ 文档编辑器**。与库本身完全隔离，自带独立的 `package.json`/`vite.config.js`，不影响库的 `npm run build`。
+
+### 11.1 三层架构
+
+```
+┌─────────────┐   REST(文档元数据)    ┌──────────────┐
+│  demo 前端   │ ───────────────────→ │  demo 后端    │  demo/server：列表/创建/删除（端口 4001）
+│ (Vue3+Vite) │                      │ (Node+SQLite) │  存 id/title/createdBy/时间戳
+│ :5173       │   WebSocket(Yjs协同)  ├──────────────┤
+│             │ ───────────────────→ │ collab-server │  上层仓库自带：Yjs 实时同步（端口 4000）
+└─────────────┘                      └──────────────┘
+```
+
+- **demo 后端**（`demo/server/`，自建）：只管**文档元数据**（REST：GET/POST/DELETE `/api/documents`），SQLite 存 id/title/createdBy/时间戳
+- **collab-server**（上层仓库，不动）：只管 **Yjs 实时协同**（内容同步、光标、二进制持久化）
+- **关联点**：demo 后端创建文档生成的 **uuid**，同时作为 ① demo 后端主键 ② collab-server 的 Yjs `documentName`，两边通过 uuid 关联，互不碰对方的数据
+
+### 11.2 双模式（单机 / 协同）
+
+登录页选择，写入 `auth.user.mode`：
+- **单机模式（standalone）**：文档存 localStorage，开箱即用，零后端依赖
+- **协同模式（collab）**：文档列表走 demo 后端 REST（多用户共享），编辑器内容走 collab-server 的 Yjs 协同（实时同步 + 光标）
+
+**需求动机**：单机模式用 localStorage 是单浏览器本地的，跨用户看不到；协同模式让用户 A 建的文档用户 B 立刻能看到、能同时编辑。
+
+### 11.3 目录结构
+
+```
+demo/
+├── package.json              # @umoteam/editor 走 file:.. 引用本地仓库 dist/
+├── vite.config.js            # optimizeDeps.exclude + resolve.dedupe（见 11.6 关键坑）
+├── index.html
+├── server/                   # demo 自建后端
+│   ├── package.json          #   deps: better-sqlite3 13.0.2, uuid 10.0.0
+│   ├── index.js              #   http + SQLite + REST 路由（端口 4001）
+│   └── data/                 #   SQLite 数据（gitignore）
+└── src/
+    ├── main.js               # 注册 router + TDesign + useUmoEditor + 引入样式
+    ├── App.vue
+    ├── router/index.js       # 3 路由 + 登录守卫
+    ├── store/
+    │   ├── auth.js           # 用户名/角色/模式（localStorage）
+    │   └── documents.js      # 文档 CRUD（双模式：localStorage / REST）+ uuid + 摘要/相对时间
+    ├── utils/
+    │   ├── api.js            # demo 后端 REST 客户端（:4001）
+    │   └── collab-config.js  # 协同服务地址解析（指向 collab-server :4000）
+    ├── composables/useToast.js
+    ├── styles/global.css
+    └── views/
+        ├── LoginView.vue        # 登录页（用户名 + 角色 + 模式选择）
+        ├── DocumentsView.vue    # 文档列表（双模式 + loading/失败态）
+        └── EditorView.vue       # 编辑器页（单机 localStorage / 协同 Yjs+Hocuspocus + 工具栏人员信息注入）
+```
+
+### 11.4 关键功能实现
+
+**EditorView.vue 协同分支**（参照 `src/app.vue` 成熟实现）：
+- `new Y.Doc()` + `HocuspocusProvider({ url: getCollabWsUrl(), name: docId, token: fetch collab-server /api/token, ... })`
+- **构造函数回调**注册事件（`onSynced`/`onAuthenticationFailed`/`onAwarenessChange`/`onAwarenessUpdate`），避免事件早于监听器的竞争（比 `provider.on()` 更可靠）
+- 预填空段落（修 y-prosemirror 初始竞争，同第五节）
+- `extensions:[Collaboration, 远程光标Extension]`、`disableExtensions:['undoRedo']`、`document.content:''`（协同内容由服务端驱动）
+- `v-if="doc && editorReady"` 等同步后挂编辑器，连接中显示「正在连接协同服务…」
+- `onUnmounted` 销毁 provider/ydoc
+
+**工具栏人员信息注入**（`EditorView.vue` 的 `injectToolbarInfo`）：
+- 编辑器工具栏的 `.umo-toolbar-actions` **不暴露 slot**，只能挂载后 DOM 注入
+- 注入元素 `.umo-demo-toolbar-info` 到 `.umo-toolbar-actions-ribbon` 内末尾，含头像组（首字母 + 叠加）+ 编辑/查看 tag + 协同/单机 tag
+- 单机显示自己 1 人，协同显示所有在线协作者（awareness 驱动，去重）
+- 头像组可点击，弹出人员浮框（挂 document.body，定位头像下方），每人显示头像+用户名+角色（编辑/查看）
+- 点击外部/滚动/缩放自动关闭；`@changed:toolbar` 事件触发 ribbon↔classic 切换后重新注入
+- **每次注入都从容器内重新查询宿主**（`container.querySelector(INFO_HOST_CLASS)`），避免编辑器重渲后 `infoHostEl` 变游离节点导致事件失效
+- 头像点击绑定用 `addEventListener`（每次 renderInfoBar 重绑），**不要用 inline onclick + window 全局**——HMR/重渲后全局函数会丢失
+
+### 11.5 库的工具栏布局重构（`src/components/toolbar/index.vue`）
+
+**需求**：把 ribbon 模式工具栏从「tabs 与 actions 同行」改为两行——标题行在上，tabs 下移：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 文档标题                    保存状态│切换工具栏│人员信息│编辑│协同 │  ← 标题行（新增）
+├─────────────────────────────────────────────────────────────┤
+│ 开始  插入  表格  工具  页面  视图  导出                      │  ← tabs（下移）
+│ [...工具按钮组...]                                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**改动**：
+- 模板按 ribbon / classic 模式分离为两个独立 `<div>` 结构（`v-if` / `v-else-if`）
+- ribbon 容器加 `.umo-toolbar-container-ribbon`（`flex-direction: column`），内含 `.umo-toolbar-header`（标题行）+ `<toolbar-ribbon>`
+- `.umo-toolbar-header`：`display:flex; justify-content:space-between`，左 `.umo-toolbar-title`（文档标题，`$document.value.title`，响应式），右 `.umo-toolbar-actions-ribbon`
+- `.umo-toolbar-actions-ribbon` 去掉 `position:absolute; right:0; top:1px`，改 `position:static`（标题行内自然右对齐）
+- classic 模式**完全不变**（用户只要 ribbon 改动）
+- modern skin 覆盖：移除 ribbon 的 `right/top !important`，改为给标题行加 padding
+- demo 的 EditorView 顶部栏去掉文档标题（避免与工具栏标题行重复）
+
+**注意**：demo 通过 `file:..` 引用库的 `dist/`，**库的工具栏改动必须 `npm run build` 重新构建后 demo 才生效**。
+
+### 11.6 集成时的关键坑（demo 特有，库本身不会遇到）
+
+| # | 报错/现象 | 根因 | 解决 |
+|---|---|---|---|
+| D1 | Vite 预打包报 `incompatible with the dep optimizer`（@umoteam/editor） | 编辑器是已构建的 ESM bundle，Vite 试图预打包它失败 | `optimizeDeps.exclude: ['@umoteam/editor']` |
+| D2 | 协同编辑器挂载后报 `Cannot read properties of undefined (reading 'localsInner')` | demo 自己装的 `@tiptap/core`/`prosemirror-*` 与编辑器 bundle 外部化的实例是两个不同模块，ProseMirror schema instanceof 校验失败 | `resolve.dedupe` 强制 vue/yjs/@tiptap/*/prosemirror-* 用单一实例；并把 `@tiptap/*` 版本锁到 3.20.0（与库一致） |
+| D3 | 协同模式编辑器不挂载（`editorReady` 一直 false） | HocuspocusProvider 的 `synced` 事件在 `provider.on('synced')` 注册前就触发了（事件竞争） | 用构造函数回调 `onSynced()` 注册（在内部建立连接前），比 `provider.on()` 更可靠 |
+| D4 | 工具栏人员信息注入后点击无反应 | inline `onclick` + `window.__xxx` 全局函数在 HMR/重渲后丢失；或 `infoHostEl` 引用变成游离节点 | `addEventListener` 每次 renderInfoBar 重绑；每次注入都从容器重新查询宿主 |
+| D5 | utf-8 中文在 curl 测试时乱码 | Git Bash 的 curl `-d` 在 Windows 把中文编码成 GBK | 服务端 UTF-8 处理正常（前端 fetch 发标准 UTF-8），curl 测试用 Node fetch 验证 |
+
+### 11.7 启动方式（3 个终端）
+
+```bash
+# 终端 1：协同服务（上层仓库，不动）
+cd D:\workspace\editor\collab-server && npm install && npm start   # :4000
+
+# 终端 2：demo 后端（自建）
+cd D:\workspace\editor\demo\server && npm install && npm start      # :4001
+
+# 终端 3：demo 前端
+cd D:\workspace\editor\demo && npm install && npm run dev           # :5173
+
+# 浏览器：登录页选「协同模式」，开两个窗口用不同用户名登录
+# → 用户 A 建文档，用户 B 列表立刻可见 → 两人同时编辑实时同步
+# 单机模式：只开终端 3 即可，登录选「单机模式」
+```
+
+**运行时配置**（可选，部署时无需重新构建）：
+```js
+window.__UMO_API_URL__    = 'https://api.your-domain.com'     // demo 后端（REST）
+window.__UMO_COLLAB_URL__ = 'wss://collab.your-domain.com'    // 协同服务（WebSocket）
+```
+
+---
+
+## 十二、新对话快速接续指南
 
 在新对话里可以这样开头：
 
-> "我在给 Umo Editor（D:\workspace\editor）做协同编辑。阶段二核心功能（光标、JWT、SQLite 持久化、多文档、undo、协作者图例、权限控制）已完成。请看 COLLAB_HANDOFF.md 了解全部背景。接下来要做 [具体任务]。"
+> "我在给 Umo Editor（D:\workspace\editor）做协同编辑 + demo 宿主应用。阶段二协同核心（光标、JWT、SQLite、多文档、undo、协作者图例、权限）已完成，还做了一个独立的 demo 应用（登录/文档列表/编辑器，单机+协同双模式，工具栏标题行布局+人员信息浮框）。请看 COLLAB_HANDOFF.md 了解全部背景。接下来要做 [具体任务]。"
 
 常见接续任务：
 - "修复协同 redo" → 第七节"redo 遗留问题"（undo 后 redo 栈被清空，需研究 `_typeChanged` 触发的事务如何避免清栈）
-- "做权限管理 UI" → 第八节（当前权限由 URL `?role=` 指定，需加邀请/权限表界面）
+- "做权限管理 UI" → 第八节（当前权限由 URL `?role=` 或 demo 登录角色指定，需加邀请/权限表界面）
 - "做 Redis 多实例广播" → 第八节（阶段三）
 - "优化大并发性能" → awareness 广播 O(N²) 是瓶颈，需多实例 + Redis（阶段三）
 - "向 tiptap 报 issue" → 第八节（preventDispatch + trackedOrigins 多副本 + Tiptap 命令协同不兼容，都有诊断证据）
 - "切到 MySQL/PostgreSQL" → 替换 `collab-server/storage.js`，保持 `loadDoc`/`saveDoc`/`closeDb` 签名
 - "验证 columns/callout 等节点的协同兼容性" → 逐个测试 Umo 自定义扩展
+- "demo 协同文档标题在编辑器内同步" → 当前协同文档标题创建时定死（不写回 demo 后端 meta），如需编辑器内改标题同步元数据，需加 PATCH /api/documents/:id + 监听编辑器 title 变化
+- "demo 工具栏布局再调整" → 第十一节 11.5（toolbar/index.vue 的 ribbon 模式标题行结构）
 
 ### 当前所有改动文件清单（`git diff --stat`）
 
 ```
-COLLAB_HANDOFF.md                       # 本文档
-collab-server/server.js                 # token 端点加 role + onAuthenticate 设 readOnly
-src/app.vue                             # role/collaborators/flushDelay/provide/setEditable
-src/assets/styles/editor.less           # 光标 CSS 修复（移出 :-webkit-any）+ 协作者头像组样式
-src/components/editor/index.vue         # onUpdate 传 isCollab
-src/components/index.vue                # undoManager 取出 + trackedOrigins 修复 + undoHistory 协同分流
+# 库源码（协同 + 工具栏布局）
+COLLAB_HANDOFF.md                            # 本文档
+collab-server/server.js                      # token 端点加 role + onAuthenticate 设 readOnly
+src/app.vue                                  # role/collaborators/flushDelay/provide/setEditable
+src/assets/styles/editor.less                # 光标 CSS 修复（移出 :-webkit-any）+ 协作者头像组样式
+src/components/editor/index.vue              # onUpdate 传 isCollab
+src/components/index.vue                     # undoManager 取出 + trackedOrigins 修复 + undoHistory 协同分流
 src/components/menus/toolbar/base/undo.vue   # 协同 disabled 绑定
 src/components/menus/toolbar/base/redo.vue   # 协同 disabled 绑定
-src/components/statusbar/index.vue      # 协作者头像组 UI
-src/utils/history-record.js             # addHistory 协同短路
+src/components/statusbar/index.vue           # 协作者头像组 UI
+src/components/toolbar/index.vue             # ribbon 模式工具栏标题行布局（文档标题+actions 上移一行，tabs 下移）
+src/utils/history-record.js                  # addHistory 协同短路
+
+# demo 宿主应用（独立子项目，新增）
+demo/                                        # 整个 demo 目录是新增
+demo/package.json                            # @umoteam/editor(file:..) + tdesign + vue-router + 协同客户端包
+demo/vite.config.js                          # optimizeDeps.exclude + resolve.dedupe（修 D1/D2）
+demo/server/                                 # demo 自建后端（Node + SQLite + REST，端口 4001）
+demo/src/main.js                             # 注册 router + TDesign + useUmoEditor
+demo/src/App.vue                             # router-view + 过渡动画
+demo/src/router/index.js                     # 3 路由 + 登录守卫
+demo/src/store/auth.js                       # 用户名/角色/模式（localStorage）
+demo/src/store/documents.js                  # 文档 CRUD 双模式 + uuid + 摘要/相对时间
+demo/src/utils/api.js                        # demo 后端 REST 客户端
+demo/src/utils/collab-config.js             # 协同服务地址解析
+demo/src/views/LoginView.vue                 # 登录页（用户名+角色+单机/协同模式）
+demo/src/views/DocumentsView.vue             # 文档列表（双模式+loading/失败态）
+demo/src/views/EditorView.vue                # 编辑器（单机/协同双模式 + 工具栏人员信息注入+浮框）
+demo/README.md                               # demo 启动说明
 ```
 
-### 启动验证（3 个终端）
+### 启动验证
 
+**方式 A：库协同 dev（最快验证协同能力本身）**
 ```bash
-# 终端 1：协同服务
-cd D:\workspace\editor\collab-server && npm start   # 端口 4000
-
-# 终端 2：前端
-cd D:\workspace\editor && npm run dev               # 端口 9000
-
-# 浏览器测试：
-# 两个编辑者：开两个 ?collab=1&doc=test 窗口
-# 一编辑一只读：A 用 ?collab=1&doc=test，B 用 ?collab=1&doc=test&role=viewer
+cd D:\workspace\editor\collab-server && npm start   # 端口 4000（协同服务）
+cd D:\workspace\editor && npm run dev               # 端口 9000（库 dev demo）
+# 浏览器：两个 ?collab=1&doc=test 窗口，或 A 用 ?role=viewer 测只读
 # 观察：状态栏左区出现协作者头像组，hover 看权限标签，viewer 无法编辑
+```
+
+**方式 B：完整 demo（登录/列表/编辑器 + 单机/协同双模式，3 个终端）**
+```bash
+cd D:\workspace\editor\collab-server && npm start   # :4000（协同服务）
+cd D:\workspace\editor\demo\server && npm start     # :4001（demo 后端）
+cd D:\workspace\editor\demo && npm run dev          # :5173（demo 前端）
+# 登录选「协同模式」，开两个窗口不同用户名 → A 建文档 B 列表可见 → 实时协同编辑
+# 单机模式：只开 demo 前端（终端 3），登录选「单机模式」即可
+# 注意：改了库源码（如 toolbar/index.vue）必须 cd D:\workspace\editor && npm run build 重建，demo 才生效
 ```

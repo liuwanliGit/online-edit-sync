@@ -1,0 +1,36 @@
+# === 依赖与构建产物（镜像内重新安装/构建，避免带入 Windows 二进制）===
+**/node_modules/
+dist/
+package/
+demo/dist/
+
+# === 运行时数据（容器内由卷挂载生成）===
+collab-server/data/
+demo/server/data/
+
+# === 版本控制与编辑器 ===
+.git/
+.gitignore
+.husky/
+.vscode/
+.idea/
+.zcode/
+
+# === 日志与缓存 ===
+**/*.log
+logs/
+.npm/
+.eslintcache
+.stylelintcache
+.prettiercache
+vite.config.js.timestamp*
+
+# === 文档（不影响运行）===
+COLLAB_HANDOFF.md
+TODO/
+LICENSE
+
+# === OS 杂项 ===
+.DS_Store
+Thumbs.db
+kill-port.bat
