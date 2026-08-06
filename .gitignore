@@ -35,7 +35,7 @@ types/imports.d.ts
 types/components.d.ts
 
 # Lock files
-package-lock.json
+# package-lock.json is committed for reproducible Docker builds (lockfileVersion 3)
 yarn.lock
 pnpm-lock.yaml
 
