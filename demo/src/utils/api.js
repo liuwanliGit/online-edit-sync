@@ -1,20 +1,32 @@
 /**
- * demo 后端 REST 客户端
+ * 瘦客户端后端 REST 客户端
  * -----------------------------------------------------------
  * 指向 demo 自建的文档管理后端（demo/server，默认 http://localhost:4001）。
- * 只管文档元数据：列表 / 创建 / 删除。
+ * 职责：
+ *   1. 文档元数据：列表 / 创建 / 删除 / 单个
+ *   2. 代理签 JWT：POST /api/doc-token（业务后端持 UMO_API_KEY 调引擎）
  *
- * 地址可通过运行时全局变量覆盖（无需重新构建）：
- *   window.__UMO_API_URL__ = 'https://api.your-domain.com'
+ * 协同编辑（Yjs 实时同步）由引擎 collab-server 负责，前端不直接接触。
+ * 导出 Word 走 iframe postMessage 协议（方案 B3），不经此文件。
  *
- * 协同编辑（Yjs 实时同步）由独立的 collab-server 负责，见 collab-config.js。
+ * 地址优先级（高 → 低）：
+ *   1. window.__UMO_CONFIG__.apiBase  —— 来自 /config.js（部署后可编辑，推荐）
+ *   2. window.__UMO_API_URL__         —— 旧的全局变量覆盖（兼容）
+ *   3. 兜底 http://localhost:4001      —— 本地开发默认值
  */
 
 const FALLBACK = 'http://localhost:4001'
 
 export function getApiBase() {
-  if (typeof window !== 'undefined' && window.__UMO_API_URL__) {
-    return String(window.__UMO_API_URL__).trim().replace(/\/+$/, '')
+  const w = typeof window !== 'undefined' ? window : undefined
+  // 优先读 config.js
+  const fromConfig = w?.__UMO_CONFIG__?.apiBase
+  if (fromConfig) {
+    return String(fromConfig).trim().replace(/\/+$/, '')
+  }
+  // 兼容旧的全局变量
+  if (w?.__UMO_API_URL__) {
+    return String(w.__UMO_API_URL__).trim().replace(/\/+$/, '')
   }
   return FALLBACK
 }
@@ -35,14 +47,13 @@ async function request(path, options = {}) {
 /** 文档列表（按 updated_at 倒序） */
 export async function fetchDocuments() {
   const data = await request('/api/documents')
-  // 后端字段是 snake_case，前端统一转成 camelCase 供组件使用
-  return (data.documents || []).map((d) => ({
-    id: d.id,
-    title: d.title,
-    createdBy: d.created_by,
-    createdAt: d.created_at,
-    updatedAt: d.updated_at,
-  }))
+  return (data.documents || []).map(toCamel)
+}
+
+/** 单个文档元数据 */
+export async function fetchDocument(id) {
+  const d = await request(`/api/documents/${encodeURIComponent(id)}`)
+  return toCamel(d)
 }
 
 /** 新建文档，返回 { id, title, ... } */
@@ -51,13 +62,7 @@ export async function createDocument({ title, createdBy }) {
     method: 'POST',
     body: JSON.stringify({ title, createdBy }),
   })
-  return {
-    id: d.id,
-    title: d.title,
-    createdBy: d.created_by,
-    createdAt: d.created_at,
-    updatedAt: d.updated_at,
-  }
+  return toCamel(d)
 }
 
 /** 删除文档 */
@@ -67,20 +72,24 @@ export async function deleteDocument(id) {
 }
 
 /**
- * 导出 Word：把编辑器 HTML 发给 convert-server 转 .docx，返回 Blob。
- * 走 nginx 的 /api/convert/ 反代（同站），与文档管理接口共用 baseURL。
- * 注意：不能用上面的 request()（它按 JSON 解析），这里直接 fetch 取 blob。
+ * 代理签 JWT：调 demo 后端 /api/doc-token
+ * 业务后端持 UMO_API_KEY 调引擎 /api/token，前端只拿到短时 JWT。
+ * @returns {Promise<{token, doc, role, name}>}
  */
-export async function exportDocx(html, title) {
-  const url = `${getApiBase()}/api/convert/docx`
-  const res = await fetch(url, {
+export async function fetchDocToken({ doc, name, role }) {
+  return request('/api/doc-token', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ html, title }),
+    body: JSON.stringify({ doc, name, role }),
   })
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    throw new Error(data.error || `转换失败 (${res.status})`)
+}
+
+// snake_case → camelCase
+function toCamel(d) {
+  return {
+    id: d.id,
+    title: d.title,
+    createdBy: d.created_by,
+    createdAt: d.created_at,
+    updatedAt: d.updated_at,
   }
-  return await res.blob()
 }

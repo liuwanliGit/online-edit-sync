@@ -1,0 +1,43 @@
+/**
+ * 引擎地址解析（瘦客户端指向 Umo Editor 引擎镜像）
+ * -----------------------------------------------------------
+ * 地址优先级（高 → 低）：
+ *   1. window.__UMO_CONFIG__.engineUrl  —— 来自 /config.js（部署后可编辑，推荐）
+ *   2. window.__UMO_ENGINE_URL__        —— 旧的全局变量覆盖（兼容）
+ *   3. 兜底 http://localhost:9999         —— 本地开发默认值
+ *
+ * 反代同源时（业务系统 nginx 把引擎反代到 /editor/ 子路径）：
+ *   config.js 里 engineUrl: '/editor'
+ */
+
+const FALLBACK = 'http://localhost:9999'
+
+function normalize(raw) {
+  if (!raw) return FALLBACK
+  const s = String(raw).trim().replace(/\/+$/, '')
+  return s || FALLBACK
+}
+
+const w = typeof window !== 'undefined' ? window : undefined
+const resolved = normalize(
+  w?.__UMO_CONFIG__?.engineUrl || w?.__UMO_ENGINE_URL__,
+)
+
+/** 引擎根地址（拼 iframe src、convert 接口等用） */
+export function getEngineUrl() {
+  return resolved
+}
+
+/**
+ * 构造 /embed iframe URL
+ * @param {string} doc    文档 id（业务系统文档主键）
+ * @param {string} token  业务后端签发的 JWT
+ * @param {string} mode   'edit' | 'view'
+ * @param {string} lang   'zh-CN' | 'en-US'
+ * @param {string} title  文档标题（显示在编辑器内标题位，可选）
+ */
+export function getEmbedUrl(doc, token, mode = 'edit', lang = 'zh-CN', title = '') {
+  const params = new URLSearchParams({ doc, token, mode, lang })
+  if (title) params.set('title', title)
+  return `${resolved}/embed?${params.toString()}`
+}

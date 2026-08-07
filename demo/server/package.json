@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Umo Editor demo 后端：文档元数据管理（列表/创建/删除）。协同编辑由 collab-server 负责，本服务不碰 Yjs 二进制。",
+  "description": "Umo Editor 瘦客户端示例后端：文档元数据管理 + 代理签 JWT + 接收导出文件回传（方案 B3）。协同编辑由引擎负责，本服务不碰 Yjs 二进制。",
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js"
   },
   "dependencies": {
     "better-sqlite3": "11.10.0",
+    "busboy": "1.6.0",
     "uuid": "10.0.0"
   }
 }

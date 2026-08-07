@@ -1,8 +1,10 @@
 import { reactive, watch } from 'vue'
 
-// 当前登录会话：{ name, role, mode }，持久化到 localStorage。
+// 当前登录会话：{ name, role }，持久化到 localStorage。
 // role: 'editor'（可编辑）| 'viewer'（只读）
-// mode: 'standalone'（单机，localStorage）| 'collab'（协同，走后端 + 协同服务）
+//
+// 瘦客户端说明：编辑器通过 iframe 嵌入引擎 /embed，协同由引擎负责。
+// role 决定向业务后端请求 token 时传的角色（editor/viewer），引擎服务端会强制只读。
 const STORAGE_KEY = 'umo-demo:auth'
 
 function load() {
@@ -31,8 +33,8 @@ watch(
   { deep: true },
 )
 
-export function login(name, role, mode = 'standalone') {
-  auth.user = { name: name.trim(), role, mode }
+export function login(name, role) {
+  auth.user = { name: name.trim(), role }
 }
 
 export function logout() {
@@ -41,10 +43,6 @@ export function logout() {
 
 export function isViewer() {
   return auth.user?.role === 'viewer'
-}
-
-export function isCollab() {
-  return auth.user?.mode === 'collab'
 }
 
 export function isLoggedIn() {

@@ -3,6 +3,7 @@
 dist/
 package/
 demo/dist/
+embed/dist/
 
 # === 运行时数据（容器内由卷挂载生成）===
 collab-server/data/

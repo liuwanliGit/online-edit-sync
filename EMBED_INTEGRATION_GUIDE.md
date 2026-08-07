@@ -17,11 +17,11 @@
 3. [第二步:鉴权对接](#三第二步鉴权对接企业后端代理签发-jwt)
 4. [第三步:前端 iframe 嵌入](#四第三步前端-iframe-嵌入)
 5. [第四步:与编辑器交互](#五第四步与编辑器交互)
-6. [第五步:导出与文件回传](#五第五步导出与文件回传方案-b3)
-7. [可选:nginx 同域反代(强交互)](#六可选nginx-同域反代强交互)
-8. [可选:后端读文档(列表摘要/检索)](#七可选后端读文档列表摘要检索二阶段)
-9. [完整接入示例](#八完整接入示例)
-10. [FAQ](#九faq)
+6. [第五步:导出与文件回传](#六第五步导出与文件回传方案-b3)
+7. [可选:nginx 同域反代(强交互)](#七可选nginx-同域反代强交互)
+8. [可选:后端读文档(列表摘要/检索)](#八可选后端读文档列表摘要检索二阶段)
+9. [完整接入示例](#九完整接入示例)
+10. [FAQ](#十faq)
 
 ---
 
@@ -83,6 +83,12 @@ docker run -d \
   umo-editor-engine:latest
 ```
 
+> 也可用 docker compose 启动（仓库自带 `docker/docker-compose.yml`）：
+> ```bash
+> docker compose -f docker/docker-compose.yml up -d --build
+> ```
+> 或用一键脚本：`bash docker/build.sh up`（Linux/macOS）/ `docker\build.bat`（Windows）。
+
 **环境变量说明**:
 
 | 变量 | 必填 | 说明 |
@@ -90,7 +96,8 @@ docker run -d \
 | `JWT_SECRET` | 是 | JWT 签名密钥(HS256)。务必设为强随机值,不对外公开 |
 | `UMO_API_KEY` | 是 | 业务后端调用 `/api/token` 时的凭据。务必设为强随机值 |
 | `JWT_EXPIRES_IN` | 否 | JWT 过期时间,默认 `24h` |
-| `PORT` | 否 | 引擎监听端口,默认 `9999` |
+
+> 端口：容器内 nginx 固定监听 `9999`，通过 `-p <宿主机端口>:9999` 映射。如需改对外端口，改 `-p 8080:9999` 即可。
 
 **数据持久化**:`-v umo-collab-data:/app/collab-server/data` 挂载协同文档存储卷,容器重建不丢数据。
 
@@ -309,12 +316,12 @@ window.addEventListener('message', (e) => {
 
 **流程**:
 ```
-1. 业务前端 → iframe: { type:'export', format:'docx', title:'文档标题', callbackUrl:'https://biz/api/receive-doc', id:'r1' }
+1. 业务前端 → iframe: { type:'export', format:'docx', title:'文档标题', callbackUrl:'https://biz/api/receive-doc', apiKey:'<业务后端鉴权key>', id:'r1' }
 
 2. iframe 内:
    - html = editor.getVanillaHTML()        // 高保真(前端已渲染)
    - blob = await convert-server 转 docx
-   - POST blob 到 callbackUrl              // 直接推给业务后端
+   - POST blob 到 callbackUrl              // 直接推给业务后端（header: x-api-key）
    - postMessage 回前端: { type:'export:result', id:'r1', ok:true, url:'<业务后端返回的URL>' }
 
 3. 业务后端 /api/receive-doc:
@@ -336,6 +343,7 @@ async function exportDocx(docId, title) {
     format: 'docx',
     title,
     callbackUrl: `https://biz.your-domain.com/api/receive-doc`,  // 业务后端接收接口
+    apiKey: process.env.BIZ_RECEIVE_KEY,                          // 可选：业务后端鉴权 key（iframe 会以 x-api-key header 透传）
     id: reqId
   }, 'http://editor-host:9999')
 
@@ -357,8 +365,8 @@ async function exportDocx(docId, title) {
 ```js
 // 业务后端:接收导出的 docx
 app.post('/api/receive-doc', upload.single('file'), async (req, res) => {
-  // 1. 校验(建议带签名或 API Key,防止伪造)
-  if (req.headers['x-biz-key'] !== process.env.BIZ_RECEIVE_KEY) {
+  // 1. 校验(建议带 API Key,防止伪造；iframe 会以 x-api-key header 透传 apiKey 参数)
+  if (req.headers['x-api-key'] !== process.env.BIZ_RECEIVE_KEY) {
     return res.status(401).json({ error: '未授权' })
   }
 
@@ -570,7 +578,7 @@ JWT 默认 24h 过期。业务前端在 iframe 加载前检查有效期,临近�
 ### Q7: 引擎镜像里为什么没有文档列表/登录页?哪里有完整示例?
 因为文档列表、登录、权限管理是**业务系统自己的职责**,引擎只管「编辑这一篇文档时的实时协同」。引擎默认入口是 `/embed`(纯编辑器)。
 
-完整示例在仓库的 `demo/` 目录,是一个**瘦客户端源码**(不打包镜像):演示业务系统如何用 iframe 接引擎,含登录/列表/编辑器页 + 四类交互演示(同源直调、postMessage、导出回传、鉴权对接)。接入方 `npm install && npm run dev` 即可看到完整接入流程,示例代码可直接照抄。详见 `EMBED_DEPLOYMENT_PLAN.md` 第九节。
+完整示例在仓库的 `demo/` 目录,是一个**瘦客户端源码**(不打包镜像):演示业务系统如何用 iframe 接引擎,含登录/列表/编辑器页 + 四类交互演示(同源直调、postMessage、导出回传、鉴权对接)。先启动引擎镜像,再启动示例后端 + 前端(`npm install && npm run dev`),即可看到完整接入流程,示例代码可直接照抄。详见 `demo/README.md` 与 `EMBED_DEPLOYMENT_PLAN.md` 第九节。
 
 ---
 

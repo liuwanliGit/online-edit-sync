@@ -27,6 +27,12 @@ const routes = [
     meta: { requiresAuth: true },
     props: true,
   },
+  {
+    path: '/docs',
+    name: 'docs',
+    component: () => import('@/views/DocsView.vue'),
+    // 公开访问，不设 requiresAuth（与 /login 一致）
+  },
   // 兜底
   { path: '/:pathMatch(.*)*', redirect: '/' },
 ]

@@ -26,6 +26,11 @@ const PORT = process.env.PORT || 4000
 // JWT 密钥（HS256 对称密钥），生产环境务必通过环境变量设置
 const JWT_SECRET = process.env.JWT_SECRET || 'umo-collab-secret-dev-only'
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h'
+// API Key：业务后端调 /api/token 签 JWT 时必须带 header `x-api-key` 校验。
+// 私有化部署务必通过 UMO_API_KEY 环境变量设为强随机值，不对外公开。
+// 未设置时仅打印警告并放行（仅用于本地 dev，生产镜像必须配置）。
+const UMO_API_KEY = process.env.UMO_API_KEY || ''
+const CORS_ORIGIN = '*'
 
 // ============ Hocuspocus 服务 ============
 const server = Server
@@ -37,13 +42,54 @@ server.configure({
 
   // ============ 生命周期 hook ============
 
-  // HTTP 请求处理：提供 JWT 签发端点
-  // GET /api/token?name=用户名&doc=文档名&role=editor|viewer → 返回签名的 JWT
+  // HTTP 请求处理：提供 JWT 签发端点（API Key 收口）
+  // GET /api/token?name=用户名&doc=文档名&role=editor|viewer
+  //   header: x-api-key: <UMO_API_KEY>  → 校验通过才签发 JWT
   //   role=editor（默认）：可编辑；role=viewer：只读（服务端拒绝其 update）
   // 同一个端口（4000）同时提供 WebSocket 协同服务和 HTTP token 签发
   async onRequest({ request, response }) {
     const url = new URL(request.url, `http://${request.headers.host}`)
-    if (url.pathname === '/api/token' && request.method === 'GET') {
+    const { pathname } = url
+
+    // CORS 预检：业务后端可能跨域调 /api/token
+    if (request.method === 'OPTIONS' && pathname === '/api/token') {
+      response.writeHead(204, {
+        'Access-Control-Allow-Origin': CORS_ORIGIN,
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, x-api-key',
+        'Access-Control-Max-Age': '86400',
+      })
+      response.end()
+      throw null
+    }
+
+    // 健康检查
+    if (pathname === '/api/health' && request.method === 'GET') {
+      response.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': CORS_ORIGIN,
+      })
+      response.end(JSON.stringify({ ok: true, service: 'umo-collab-server' }))
+      throw null
+    }
+
+    if (pathname === '/api/token' && request.method === 'GET') {
+      // API Key 收口：生产环境必须配置 UMO_API_KEY，业务后端持此 Key 代理调本端点
+      if (UMO_API_KEY) {
+        const apiKey = request.headers['x-api-key']
+        if (!apiKey || apiKey !== UMO_API_KEY) {
+          response.writeHead(401, {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': CORS_ORIGIN,
+          })
+          response.end(JSON.stringify({ error: 'API Key 无效或缺失' }))
+          throw null
+        }
+      } else {
+        // dev 兜底：未配 UMO_API_KEY 时仅警告（生产镜像必须配置）
+        console.warn('[warn] UMO_API_KEY 未设置，/api/token 处于无鉴权模式（仅 dev 可用）')
+      }
+
       const name = url.searchParams.get('name') || `用户-${Math.floor(Math.random() * 1000)}`
       const doc = url.searchParams.get('doc') || 'demo-doc'
       // role 校验：只接受 editor / viewer，默认 editor
@@ -52,7 +98,7 @@ server.configure({
       const token = jwt.sign({ name, doc, role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN })
       response.writeHead(200, {
         'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*', // 前端 9000 端口跨域访问 4000
+        'Access-Control-Allow-Origin': CORS_ORIGIN,
       })
       response.end(JSON.stringify({ token, name, doc, role }))
       // 抛 falsy 值阻止 Hocuspocus 走默认响应（源码 line 2001-2008：
@@ -116,6 +162,7 @@ server.configure({
   async onListen() {
     console.log(`\n✅ 协同服务已启动: ws://localhost:${PORT}`)
     console.log(`   鉴权方式: JWT (HS256)，签发端点 GET /api/token`)
+    console.log(`   API Key 收口: ${UMO_API_KEY ? '已启用（业务后端须带 x-api-key）' : '未启用（dev 模式，/api/token 无鉴权）'}`)
     console.log(`   持久化方式: SQLite（WAL 模式）\n`)
   },
 })

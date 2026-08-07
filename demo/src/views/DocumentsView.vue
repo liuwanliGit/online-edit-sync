@@ -21,17 +21,6 @@
           </template>
           {{ isViewer() ? '只读者' : '编辑者' }}
         </t-tag>
-        <t-tag
-          :theme="isCollab() ? 'warning' : 'success'"
-          variant="light"
-          shape="round"
-          size="small"
-        >
-          <template #icon>
-            <t-icon :name="isCollab() ? 'user-group' : 'desktop'" />
-          </template>
-          {{ isCollab() ? '协同' : '单机' }}
-        </t-tag>
         <t-divider layout="vertical" />
         <t-button theme="default" variant="text" shape="square" @click="onLogout">
           <template #icon><t-icon name="poweroff" /></template>
@@ -67,7 +56,7 @@
               <t-icon name="file" class="card-file-icon" />
             </div>
             <p class="card-summary">
-              {{ doc.content ? summary(doc.content) : '点击打开，在线编辑文档内容' }}
+              点击打开，通过 iframe 嵌入引擎编辑
             </p>
             <div class="card-meta">
               <span class="meta-author">
@@ -96,18 +85,18 @@
         </article>
       </div>
 
-      <!-- 加载中（协同模式） -->
+      <!-- 加载中 -->
       <div v-else-if="loading" class="empty">
         <div class="empty-illu loading-spin"><t-icon name="loading" /></div>
         <h3>正在加载文档…</h3>
       </div>
 
-      <!-- 加载失败（协同模式后端连不上） -->
+      <!-- 加载失败（后端连不上） -->
       <div v-else-if="loadError" class="empty">
         <div class="empty-illu err-illu"><t-icon name="error-triangle" /></div>
         <h3>无法加载文档</h3>
         <p>{{ loadError }}</p>
-        <p v-if="isCollab()" class="err-tip">请确认 demo 后端已启动（默认 http://localhost:4001）</p>
+        <p class="err-tip">请确认示例后端已启动（默认 http://localhost:4001）</p>
         <t-button theme="primary" variant="outline" @click="loadDocs">
           <template #icon><t-icon name="refresh" /></template>
           重新加载
@@ -181,13 +170,11 @@ import {
 } from 'tdesign-vue-next'
 
 import { useToast } from '@/composables/useToast'
-import { auth, isViewer, isCollab, logout } from '@/store/auth'
-import { list, create, remove, summary, relativeTime } from '@/store/documents'
+import { auth, isViewer, logout } from '@/store/auth'
+import { list, create, remove, relativeTime } from '@/store/documents'
 
 const router = useRouter()
 const toast = useToast()
-
-const mode = () => auth.user?.mode || 'standalone'
 
 // 文档列表（响应式）+ 加载/失败态
 const docs = ref([])
@@ -195,11 +182,10 @@ const loading = ref(false)
 const loadError = ref('')
 
 async function loadDocs() {
-  // 单机模式：list 同步返回数组；协同模式：返回 Promise
   loading.value = true
   loadError.value = ''
   try {
-    const result = await list(mode())
+    const result = await list()
     docs.value = Array.isArray(result) ? result : []
   } catch (e) {
     loadError.value = e.message || '加载失败'
@@ -223,7 +209,7 @@ function openCreate() {
 async function doCreate() {
   creating.value = true
   try {
-    const id = await create(mode(), createTitle.value, auth.user?.name)
+    const id = await create(createTitle.value, auth.user?.name)
     createVisible.value = false
     toast.success('文档已创建')
     router.push({ name: 'editor', params: { id } })
@@ -252,7 +238,7 @@ async function doDelete() {
   if (!pendingDelete.value) return
   deleting.value = true
   try {
-    const ok = await remove(mode(), pendingDelete.value.id)
+    const ok = await remove(pendingDelete.value.id)
     deleteVisible.value = false
     pendingDelete.value = null
     if (ok) {

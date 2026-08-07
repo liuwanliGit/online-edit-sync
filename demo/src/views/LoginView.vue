@@ -9,12 +9,12 @@
         </div>
         <h1 class="brand-title">在线文档<br />从这里开始协作</h1>
         <p class="brand-desc">
-          基于 @umoteam/editor 的演示应用。登录后即可新建文档、在线编辑，体验类 Word 的富文本能力。
+          瘦客户端示例：演示业务系统如何通过 iframe 嵌入 Umo Editor 引擎，实现协同编辑。
         </p>
         <ul class="brand-features">
-          <li><span class="dot" />富文本编辑 · 分页排版</li>
+          <li><span class="dot" />iframe 嵌入 · 引擎私有化部署</li>
           <li><span class="dot" />多角色权限 · 只读 / 可编辑</li>
-          <li><span class="dot" />本地持久化 · 刷新不丢稿</li>
+          <li><span class="dot" />同源直调 · 跨域 postMessage</li>
         </ul>
       </div>
       <div class="brand-decor decor-a" />
@@ -72,33 +72,6 @@
             </div>
           </div>
 
-          <div class="field">
-            <span class="field-label">编辑模式</span>
-            <div class="roles">
-              <button
-                v-for="m in modeOptions"
-                :key="m.value"
-                type="button"
-                class="role"
-                :class="{ active: mode === m.value }"
-                @click="mode = m.value"
-              >
-                <span class="role-icon" :style="{ background: m.color }">
-                  <t-icon :name="m.icon" />
-                </span>
-                <span class="role-text">
-                  <span class="role-name">{{ m.label }}</span>
-                  <span class="role-desc">{{ m.desc }}</span>
-                </span>
-                <t-icon v-if="mode === m.value" name="check-circle-filled" class="role-check" />
-              </button>
-            </div>
-            <p v-if="mode === 'collab'" class="mode-tip">
-              <t-icon name="info-circle" />
-              协同模式需启动 demo 后端（:4001）与协同服务（:4000），见 README。
-            </p>
-          </div>
-
           <t-button
             theme="primary"
             size="large"
@@ -112,8 +85,14 @@
 
           <p class="hint">
             <t-icon name="info-circle" />
-            这是一个前端 demo，登录信息仅保存在本地浏览器。
+            瘦客户端示例，登录信息仅保存在本地浏览器。需先启动引擎镜像与示例后端。
           </p>
+
+          <router-link to="/docs" class="docs-link">
+            <t-icon name="file-paste" />
+            <span>使用文档</span>
+            <t-icon name="chevron-right" class="docs-link-arrow" />
+          </router-link>
         </form>
       </div>
     </main>
@@ -134,7 +113,6 @@ const toast = useToast()
 
 const name = ref('')
 const role = ref('editor')
-const mode = ref('standalone')
 const nameError = ref('')
 const loading = ref(false)
 
@@ -155,23 +133,6 @@ const roleOptions = [
   },
 ]
 
-const modeOptions = [
-  {
-    value: 'standalone',
-    label: '单机模式',
-    desc: '文档存本浏览器，开箱即用',
-    icon: 'desktop',
-    color: 'linear-gradient(135deg,#52c41a,#73d13d)',
-  },
-  {
-    value: 'collab',
-    label: '协同模式',
-    desc: '多人共享文档，实时同步编辑',
-    icon: 'user-group',
-    color: 'linear-gradient(135deg,#9254de,#b37feb)',
-  },
-]
-
 function validateName() {
   if (!name.value.trim()) {
     nameError.value = '请输入用户名'
@@ -189,7 +150,7 @@ function onSubmit() {
   loading.value = true
   // 模拟一点登录延迟，让交互更真实
   setTimeout(() => {
-    login(name.value, role.value, mode.value)
+    login(name.value, role.value)
     toast.success(`欢迎你，${name.value.trim()}`)
     const redirect = route.query.redirect
     router.replace(typeof redirect === 'string' ? redirect : { name: 'documents' })
@@ -421,17 +382,28 @@ function onSubmit() {
   color: var(--demo-text-tertiary);
 }
 
-.mode-tip {
+.docs-link {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  margin: 8px 0 0;
-  font-size: 12px;
-  color: #d48806;
-  background: #fff7e8;
-  border: 1px solid #ffe7ba;
-  border-radius: 6px;
-  padding: 6px 10px;
+  margin-top: 4px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px dashed var(--demo-border);
+  font-size: 13px;
+  color: var(--demo-primary);
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+.docs-link:hover {
+  border-color: var(--demo-primary);
+  border-style: solid;
+  background: rgba(77, 140, 242, 0.06);
+}
+.docs-link-arrow {
+  margin-left: 2px;
+  font-size: 14px;
 }
 
 /* 窄屏：隐藏左侧品牌区，表单铺满 */

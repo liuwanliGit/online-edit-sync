@@ -8,6 +8,9 @@
   </head>
   <body>
     <div id="app"></div>
+    <!-- 运行时配置：普通 script 同步加载，保证 main.js 前 window.__UMO_CONFIG__ 就绪。
+         部署后直接改 dist/config.js 即可更新服务端与引擎地址，无需重新打包。 -->
+    <script src="/config.js"></script>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

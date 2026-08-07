@@ -1,0 +1,17 @@
+{
+  "_注释": "复制本文件为 config.json 后按实际环境修改。config.json 与 index.js 同目录，启动时自动加载。",
+
+  "_port": "本服务（demo 后端）监听端口，默认 4001",
+  "port": 4001,
+
+  "_engineUrl": "Umo Editor 引擎地址。本服务代理签 JWT 时调引擎 /api/token。默认 http://localhost:9999",
+  "engineUrl": "http://localhost:9999",
+
+  "_apiKey": "引擎 API Key。与引擎启动时的 UMO_API_KEY 环境变量保持一致。引擎 dev 模式可留空。本服务调引擎 /api/token 时以此鉴权",
+  "apiKey": "",
+
+  "_receiveKey": "接收导出文件回传（方案 B3）的鉴权 key。留空则不校验。前端在 export 请求里通过 apiKey 透传给引擎，引擎以此作为 x-api-key header 回传文件",
+  "receiveKey": "",
+
+  "_优先级": "环境变量 > config.json > 上面写的默认值。容器/CI 场景仍可用环境变量覆盖（PORT / UMO_ENGINE_URL / UMO_API_KEY / BIZ_RECEIVE_KEY）"
+}
