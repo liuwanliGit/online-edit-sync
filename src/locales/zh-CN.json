@@ -702,6 +702,20 @@
     "hide": "隐藏大纲",
     "empty": "暂无页面大纲"
   },
+  "comment": {
+    "title": "评论",
+    "add": "评论",
+    "placeholder": "写下你的评论…",
+    "replyPlaceholder": "写下你的回复…",
+    "submit": "发表",
+    "cancel": "取消",
+    "reply": "回复",
+    "resolve": "标记解决",
+    "unresolve": "取消解决",
+    "delete": "删除",
+    "resolved": "已解决",
+    "empty": "选中文字后点击\"评论\"按钮添加评论"
+  },
   "spellcheck": {
     "enable": "开启拼写检查",
     "disable": "关闭拼写检查"

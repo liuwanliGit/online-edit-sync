@@ -26,7 +26,10 @@ WORKDIR /build/demo
 COPY demo/package.json demo/package-lock.json ./
 
 # 前端纯 JS 依赖（无原生模块），可跳过 install 脚本加速
-RUN npm install --ignore-scripts
+# 用国内 npm 镜像加速依赖下载
+RUN npm config set registry https://registry.npmmirror.com \
+    && npm install --ignore-scripts \
+    && npm config delete registry
 
 # 源码 + 配置（public 含 config.js 模板，构建时原样复制到 dist）
 COPY demo/index.html demo/vite.config.js ./
@@ -46,8 +49,15 @@ RUN npm run build
 FROM crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/node:22-bookworm-slim AS runtime
 
 # 装运行时依赖：nginx（反代入口）+ supervisor（进程管理）
+# 同时装 make/g++/python3：better-sqlite3 下载预编译二进制失败时回退 node-gyp 源码编译。
+# 先换国内镜像源加速 apt。
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' \
+        /etc/apt/sources.list.d/debian.sources 2>/dev/null \
+    || sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null \
+    || true
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends nginx supervisor ca-certificates \
+    && apt-get install -y --no-install-recommends \
+       nginx supervisor ca-certificates make g++ python3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -57,8 +67,10 @@ COPY demo/server/package.json demo/server/package-lock.json ./server/
 
 WORKDIR /app/server
 # 注意：不能用 --ignore-scripts。better-sqlite3 的 install 脚本负责下载与当前 Node ABI
-# 匹配的预编译 .node 二进制（prebuild-install），跳过会导致运行时找不到原生模块。
-RUN npm install --omit=dev
+# 匹配的预编译 .node 二进制（prebuild-install），下载失败时回退到 node-gyp 源码编译。
+RUN npm config set registry https://registry.npmmirror.com \
+    && npm install --omit=dev \
+    && npm config delete registry
 
 # demo-server 源码 + 配置文件
 # 注意：index.js 顶部 import 了 ./comments.js（评论 REST + SSE）和 ./config.json（运行配置），

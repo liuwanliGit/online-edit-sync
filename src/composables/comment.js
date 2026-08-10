@@ -1,35 +1,58 @@
 /**
- * 评论状态管理（方案 B：REST + SSE + Tiptap Mark 锚定）
+ * 评论状态管理（引擎内置版：REST + SSE + Tiptap Mark 锚定）
  * -----------------------------------------------------------
  * - comments/activeCommentId 状态
- * - CRUD 走业务后端 REST（commentApiBase 由父页面 postMessage 下发）
+ * - CRUD 走引擎同源 REST（apiBase 默认空串 = 同源根路径）
  * - 实时同步走 SSE（EventSource）
  * - 评论位置由 Tiptap comment mark 锚定（data-comment-id = 评论 id），
  *   不再使用 {from, to} 位置 + 范围迁移。文字增删时 mark 自动跟随，
  *   协同编辑通过 Yjs 自动同步 mark，刷新后随 Yjs 文档恢复。
  *
- * author 由 getAuthor() 提供（embed 取 collabUser：name/color/role）。
- * viewer 也可评论（后端不限角色）。
- *
- * 挂载方式：由 index.js 调用 createCommentStore(db) 得到 { handle }，
- * 在路由里 `if (await commentStore.handle(req, res, url)) return`。
+ * author 从 options.user 取（引擎内置配置）。
+ * docId 从 options.document.docId 取。
+ * 无鉴权（同源信任——collab-server 不对外暴露，评论 API 经 nginx 同源反代）。
  */
 import { ref } from 'vue'
 
-export function useComments({ docId, getAuthor, getCommentApiBase }) {
+import { getCommentApiBase } from '@/utils/base-path'
+
+export function useComments({ options }) {
   const comments = ref([])
   const activeCommentId = ref(null)
   let sse = null
 
+  // 评论功能是否启用
+  const enabled = ref(
+    options.value.comments?.enabled !== false &&
+      !options.value.disableExtensions?.includes('comment'),
+  )
+
   function apiUrl(p) {
-    const base = (getCommentApiBase() || '').replace(/\/+$/, '')
+    const base = getCommentApiBase(options.value.comments?.apiBase)
     return `${base}/api${p}`
+  }
+
+  function getDocId() {
+    return options.value.document?.docId || ''
+  }
+
+  function getAuthor() {
+    const user = options.value.user || {}
+    return {
+      id: user.id || user.name || 'anon',
+      name: user.name || '匿名',
+      color: user.color || '',
+    }
   }
 
   // ============ 加载 + SSE ============
   async function loadComments() {
+    const docId = getDocId()
+    if (!docId) return
     try {
-      const res = await fetch(apiUrl(`/documents/${encodeURIComponent(docId)}/comments`))
+      const res = await fetch(
+        apiUrl(`/documents/${encodeURIComponent(docId)}/comments`),
+      )
       const data = await res.json().catch(() => ({}))
       comments.value = data.comments || []
     } catch (e) {
@@ -38,8 +61,12 @@ export function useComments({ docId, getAuthor, getCommentApiBase }) {
   }
 
   function connectSSE() {
+    const docId = getDocId()
+    if (!docId) return
     if (sse) sse.close()
-    const url = apiUrl(`/documents/${encodeURIComponent(docId)}/comments/stream`)
+    const url = apiUrl(
+      `/documents/${encodeURIComponent(docId)}/comments/stream`,
+    )
     sse = new EventSource(url)
     sse.onmessage = (ev) => {
       let event
@@ -57,10 +84,17 @@ export function useComments({ docId, getAuthor, getCommentApiBase }) {
   }
 
   function applySSEEvent({ type, payload }) {
-    const list = comments.value
     if (!payload) return
+    const list = comments.value
+    // 批量删除（payload.all === true 表示清空整个文档的评论）
+    if (type === 'comment:deleted' && payload.all) {
+      comments.value = []
+      activeCommentId.value = null
+      return
+    }
     if (type === 'comment:added') {
-      if (!list.find((c) => c.id === payload.id)) comments.value = [...list, payload]
+      if (!list.find((c) => c.id === payload.id))
+        comments.value = [...list, payload]
     } else if (type === 'comment:updated' || type === 'comment:replied') {
       comments.value = list.map((c) => (c.id === payload.id ? payload : c))
     } else if (type === 'comment:deleted') {
@@ -71,17 +105,22 @@ export function useComments({ docId, getAuthor, getCommentApiBase }) {
 
   // ============ CRUD ============
   async function addComment({ id, selectedText, content }) {
+    const docId = getDocId()
     const author = getAuthor()
-    const res = await fetch(apiUrl(`/documents/${encodeURIComponent(docId)}/comments`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      // id 由客户端生成（用于 mark commentId），后端直接用作主键
-      body: JSON.stringify({ id, selectedText, content, author }),
-    })
+    const res = await fetch(
+      apiUrl(`/documents/${encodeURIComponent(docId)}/comments`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // id 由客户端生成（用于 mark commentId），后端直接用作主键
+        body: JSON.stringify({ id, selectedText, content, author }),
+      },
+    )
     const data = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(data.error || '添加评论失败')
     // 本地立即插入（SSE 也会推；按 id 去重）
-    if (!comments.value.find((c) => c.id === data.id)) comments.value = [...comments.value, data]
+    if (!comments.value.find((c) => c.id === data.id))
+      comments.value = [...comments.value, data]
     return data
   }
 
@@ -99,11 +138,14 @@ export function useComments({ docId, getAuthor, getCommentApiBase }) {
 
   async function replyComment(id, content) {
     const author = getAuthor()
-    const res = await fetch(apiUrl(`/comments/${encodeURIComponent(id)}/replies`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, author }),
-    })
+    const res = await fetch(
+      apiUrl(`/comments/${encodeURIComponent(id)}/replies`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, author }),
+      },
+    )
     const data = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(data.error || '回复失败')
     comments.value = comments.value.map((c) => (c.id === id ? data : c))
@@ -111,7 +153,9 @@ export function useComments({ docId, getAuthor, getCommentApiBase }) {
   }
 
   async function deleteComment(id) {
-    const res = await fetch(apiUrl(`/comments/${encodeURIComponent(id)}`), { method: 'DELETE' })
+    const res = await fetch(apiUrl(`/comments/${encodeURIComponent(id)}`), {
+      method: 'DELETE',
+    })
     if (!res.ok) throw new Error('删除失败')
     comments.value = comments.value.filter((c) => c.id !== id)
     if (activeCommentId.value === id) activeCommentId.value = null
@@ -136,6 +180,7 @@ export function useComments({ docId, getAuthor, getCommentApiBase }) {
   }
 
   return {
+    enabled,
     comments,
     activeCommentId,
     loadComments,

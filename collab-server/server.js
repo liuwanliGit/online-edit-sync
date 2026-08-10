@@ -17,6 +17,7 @@ import jwt from 'jsonwebtoken'
 import { applyUpdate, encodeStateAsUpdate } from 'yjs'
 
 import { closeDb, loadDoc, saveDoc } from './storage.js'
+import { createCommentStorage } from './comment-storage.js'
 
 // 注：本版本 @hocuspocus/server 导出的 Server 是一个单例实例（非构造函数），
 // 用 server.configure({...}) 配置 + server.listen() 启动。
@@ -31,6 +32,9 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h'
 // 未设置时仅打印警告并放行（仅用于本地 dev，生产镜像必须配置）。
 const UMO_API_KEY = process.env.UMO_API_KEY || ''
 const CORS_ORIGIN = '*'
+
+// ============ 评论存储（独立 comments.db） ============
+const commentStorage = createCommentStorage()
 
 // ============ Hocuspocus 服务 ============
 const server = Server
@@ -50,6 +54,17 @@ server.configure({
   async onRequest({ request, response }) {
     const url = new URL(request.url, `http://${request.headers.host}`)
     const { pathname } = url
+
+    // ============ 评论 REST + SSE 路由（无鉴权，同源信任） ============
+    // 路径前缀 /api/documents/ 和 /api/comments/ 由评论存储层处理
+    if (
+      pathname.startsWith('/api/documents/') ||
+      pathname.startsWith('/api/comments/')
+    ) {
+      if (await commentStorage.handle(request, response, url)) {
+        throw null
+      }
+    }
 
     // CORS 预检：业务后端可能跨域调 /api/token
     if (request.method === 'OPTIONS' && pathname === '/api/token') {
@@ -163,7 +178,9 @@ server.configure({
     console.log(`\n✅ 协同服务已启动: ws://localhost:${PORT}`)
     console.log(`   鉴权方式: JWT (HS256)，签发端点 GET /api/token`)
     console.log(`   API Key 收口: ${UMO_API_KEY ? '已启用（业务后端须带 x-api-key）' : '未启用（dev 模式，/api/token 无鉴权）'}`)
-    console.log(`   持久化方式: SQLite（WAL 模式）\n`)
+    console.log(`   持久化方式: SQLite（WAL 模式）`)
+    console.log(`   评论 API: /api/documents/:docId/comments/*（无鉴权，同源信任）`)
+    console.log(`   评论 SSE: /api/documents/:docId/comments/stream\n`)
   },
 })
 
@@ -172,7 +189,9 @@ const shutdown = async (signal) => {
   console.log(`\n收到 ${signal}，正在关闭...`)
   await server.destroy()
   closeDb()
-  console.log(`[shutdown] SQLite 连接已关闭`)
+  console.log(`[shutdown] collab.db 连接已关闭`)
+  commentStorage.closeCommentDb()
+  console.log(`[shutdown] comments.db 连接已关闭`)
   process.exit(0)
 }
 

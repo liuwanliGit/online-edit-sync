@@ -12,6 +12,23 @@
           <icon name="toc" color="red" />
         </t-button>
       </tooltip>
+      <!-- 评论入口（显示评论数 badge） -->
+      <template v-if="commentsEnabled">
+        <tooltip :content="t('comment.title')">
+          <t-button
+            class="umo-status-bar-button"
+            :class="{ active: showCommentPanel }"
+            variant="text"
+            size="small"
+            @click="toggleCommentPanel"
+          >
+            <icon name="comment" />
+            <span v-if="commentCount > 0" class="umo-comment-badge">{{
+              commentCount
+            }}</span>
+          </t-button>
+        </tooltip>
+      </template>
       <tooltip
         v-if="options.document?.enableSpellcheck"
         :content="
@@ -417,6 +434,12 @@ const collaboratorList = computed(() =>
   (collaborators.value || []).filter((c) => c?.user),
 )
 
+// 评论功能（引擎内置）
+const commentsEnabled = inject('commentsEnabled', ref(false))
+const showCommentPanel = inject('showCommentPanel', ref(false))
+const commentCount = inject('commentCount', ref(0))
+const toggleCommentPanel = inject('commentTogglePanel', () => {})
+
 // 快捷键抽屉
 const showShortcut = $ref(false)
 
@@ -694,6 +717,23 @@ watch(
     font-size: 14px;
     margin: 0 4px;
     color: var(--umo-text-color);
+    position: relative;
+    .umo-comment-badge {
+      position: absolute;
+      top: -2px;
+      right: -4px;
+      min-width: 16px;
+      height: 16px;
+      line-height: 16px;
+      padding: 0 4px;
+      border-radius: 8px;
+      background: var(--umo-primary-color);
+      color: #fff;
+      font-size: 10px;
+      text-align: center;
+      font-weight: 600;
+      z-index: 1;
+    }
     &:not(.auto-width) {
       width: var(--td-comp-size-xs);
     }

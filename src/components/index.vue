@@ -68,6 +68,7 @@ import cnConfig from 'tdesign-vue-next/esm/locale/zh_CN'
 import { getTypewriterRunState } from '@/extensions/type-writer'
 import { i18n } from '@/i18n'
 import { propsOptions } from '@/options'
+import { useComments } from '@/composables/comment'
 import { contentTransform } from '@/utils/content-transform'
 import { consoleCopyright } from '@/utils/copyright'
 import {
@@ -171,6 +172,178 @@ provide('collabUndoManager', collabUndoManager)
 provide('collabCanUndo', collabCanUndo)
 provide('collabCanRedo', collabCanRedo)
 provide('typeWriterIsRunning', typeWriterIsRunning)
+
+// ============ 评论功能（引擎内置） ============
+const showCommentPanel = ref(false)
+const commentPendingAdd = ref(null) // { commentId, from, to, selectedText }
+const commentAddBusy = ref(false)
+
+// 评论 composable（docId/author 从 options 取）
+const {
+  enabled: commentsEnabled,
+  comments,
+  activeCommentId,
+  loadComments,
+  connectSSE,
+  addComment: commentsAddComment,
+  replyComment: commentsReplyComment,
+  resolveComment: commentsResolveComment,
+  deleteComment: commentsDeleteComment,
+  setActive: commentsSetActive,
+  clearActive: commentsClearActive,
+  dispose: commentsDispose,
+} = useComments({ options })
+
+// 评论数（用于状态栏 badge）
+const commentCount = computed(() => comments.value.length)
+// 当前用户 ID（用于判断评论删除权限）
+const commentCurrentUserId = computed(
+  () => options.value.user?.id || options.value.user?.name || '',
+)
+
+// 打开评论面板 + 设置 pendingAdd（气泡"评论"按钮触发）
+function commentStart({ commentId, from, to, selectedText }) {
+  commentPendingAdd.value = { commentId, from, to, selectedText }
+  showCommentPanel.value = true
+}
+
+// 提交新评论：先在 editor 上 setMark，再调后端
+async function commentAdd(content) {
+  const pending = commentPendingAdd.value
+  if (!pending || !editor.value) return
+  commentAddBusy.value = true
+  try {
+    const { commentId, from, to, selectedText } = pending
+    // 在选区上应用 comment mark
+    editor.value
+      .chain()
+      .focus()
+      .setTextSelection({ from, to })
+      .setMark('comment', { commentId })
+      .run()
+    // 发送到后端
+    await commentsAddComment({ id: commentId, selectedText, content })
+    commentPendingAdd.value = null
+  } catch (e) {
+    console.error('[comments] 添加评论失败', e)
+  } finally {
+    commentAddBusy.value = false
+  }
+}
+
+function commentCancelAdd() {
+  commentPendingAdd.value = null
+}
+
+async function commentReply(id, content) {
+  try {
+    await commentsReplyComment(id, content)
+  } catch (e) {
+    console.error('[comments] 回复失败', e)
+  }
+}
+
+// 标记解决/取消解决：同时更新 comment mark 的 resolved 属性
+async function commentResolve(id, resolved) {
+  try {
+    await commentsResolveComment(id, resolved)
+    updateCommentMark(id, { resolved })
+  } catch (e) {
+    console.error('[comments] 更新失败', e)
+  }
+}
+
+// 删除评论：同时移除 comment mark
+async function commentDelete(id) {
+  try {
+    await commentsDeleteComment(id)
+    removeCommentMark(id)
+  } catch (e) {
+    console.error('[comments] 删除失败', e)
+  }
+}
+
+// 聚焦评论：高亮对应文字 + 滚动到位置
+function commentFocus(id) {
+  commentsSetActive(id)
+  // dispatch 空 tr 触发 CommentHighlight decorations 重算
+  if (editor.value) {
+    editor.value.view.dispatch(editor.value.state.tr)
+  }
+  // 滚动到评论 mark 位置
+  nextTick(() => {
+    const el = document.querySelector(
+      `${container} [data-comment-id="${id}"]`,
+    )
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  })
+}
+
+// 切换评论面板
+function commentTogglePanel() {
+  showCommentPanel.value = !showCommentPanel.value
+}
+
+// ============ Comment Mark 操作工具 ============
+// 遍历文档找含指定 commentId 的 mark 的文本 range
+function findCommentMarkRanges(commentId) {
+  if (!editor.value) return []
+  const ranges = []
+  editor.value.state.doc.descendants((node, pos) => {
+    if (!node.isText) return
+    const mark = node.marks.find(
+      (m) => m.type.name === 'comment' && m.attrs.commentId === commentId,
+    )
+    if (mark) {
+      ranges.push({ from: pos, to: pos + node.nodeSize })
+    }
+  })
+  return ranges
+}
+
+// 更新 comment mark 的属性（如 resolved）
+function updateCommentMark(commentId, attrs) {
+  if (!editor.value) return
+  const ranges = findCommentMarkRanges(commentId)
+  if (!ranges.length) return
+  const { from, to } = ranges[0]
+  editor.value
+    .chain()
+    .setTextSelection({ from, to })
+    .setMark('comment', { commentId, ...attrs })
+    .run()
+}
+
+// 移除 comment mark
+function removeCommentMark(commentId) {
+  if (!editor.value) return
+  const ranges = findCommentMarkRanges(commentId)
+  if (!ranges.length) return
+  const { from, to } = ranges[0]
+  editor.value
+    .chain()
+    .setTextSelection({ from, to })
+    .unsetMark('comment')
+    .run()
+}
+
+// ============ Provide 评论状态 ============
+provide('commentsEnabled', commentsEnabled)
+provide('comments', comments)
+provide('activeCommentId', activeCommentId)
+provide('showCommentPanel', showCommentPanel)
+provide('commentCount', commentCount)
+provide('commentCurrentUserId', commentCurrentUserId)
+provide('commentPendingAdd', commentPendingAdd)
+provide('commentAddBusy', commentAddBusy)
+provide('commentStart', commentStart)
+provide('commentAdd', commentAdd)
+provide('commentCancelAdd', commentCancelAdd)
+provide('commentReply', commentReply)
+provide('commentResolve', commentResolve)
+provide('commentDelete', commentDelete)
+provide('commentFocus', commentFocus)
+provide('commentTogglePanel', commentTogglePanel)
 
 watch(
   () => options.value.page,
@@ -323,6 +496,15 @@ watch(
     editor.value.on('create', ({ editor }) => {
       destroyed.value = false
       emits('created', { editor })
+      // 评论功能：加载评论列表 + 连接 SSE
+      if (commentsEnabled.value && options.value.document?.docId) {
+        loadComments()
+        connectSSE()
+      }
+      // 点击编辑器空白处时清除评论 active 高亮
+      editor.view.dom.addEventListener('mousedown', () => {
+        if (activeCommentId.value) commentsClearActive()
+      })
       // 协同模式：从 yUndoPlugin 的 plugin state 取出 Yjs UndoManager，
       // 绕过 extension-collaboration 坏掉的 undo/redo 命令（Tiptap3 preventDispatch bug），
       // 后续 undoHistory/redoHistory 直接调 undoManager.undo()/redo()。
@@ -417,6 +599,8 @@ watch(
     )
     editor.value.on('destroy', () => {
       emits('destroy')
+      // 评论功能：关闭 SSE 连接
+      commentsDispose()
     })
   },
 )
@@ -1399,6 +1583,9 @@ defineExpose({
   getContentExcerpt,
   getEditor: () => editor,
   useEditor: () => editor.value,
+  // 评论功能 API
+  getComments: () => comments.value,
+  toggleCommentPanel: commentTogglePanel,
   getTableOfContents: () => editor.value?.storage.tableOfContents.content,
   getSelectionText: () => (editor.value ? getSelectionText(editor.value) : ''),
   getSelectionNode: () =>
@@ -1437,6 +1624,25 @@ defineExpose({
 
 <style lang="less">
 @import '@/assets/styles/index.less';
+
+// ============ 评论 Mark 样式 ============
+.umo-editor-container {
+  .umo-comment-mark {
+    background-color: rgba(77, 142, 224, 0.15);
+    border-radius: 2px;
+    transition: background-color 0.15s;
+    cursor: pointer;
+    &.resolved {
+      background-color: rgba(0, 0, 0, 0.05);
+      color: var(--umo-text-color-light);
+      text-decoration: line-through;
+    }
+  }
+  .umo-comment-active {
+    background-color: rgba(77, 142, 224, 0.3) !important;
+    box-shadow: 0 0 0 2px rgba(77, 142, 224, 0.2);
+  }
+}
 
 .umo-editor-container {
   --td-brand-color: var(--umo-primary-color);

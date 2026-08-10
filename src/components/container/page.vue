@@ -1,9 +1,18 @@
 <template>
   <div class="umo-main-container">
-    <container-toc
-      v-if="pageOptions.showToc"
-      @close="pageOptions.showToc = false"
-    />
+    <div
+      v-if="pageOptions.showToc || showCommentPanel"
+      class="umo-side-panels"
+    >
+      <container-toc
+        v-if="pageOptions.showToc"
+        @close="pageOptions.showToc = false"
+      />
+      <container-comment
+        v-if="showCommentPanel"
+        @close="showCommentPanel = false"
+      />
+    </div>
     <div
       :class="`umo-zoomable-container umo-${pageOptions.layout}-container umo-scrollbar`"
     >
@@ -93,6 +102,8 @@
 const container = inject('container')
 const imageViewer = inject('imageViewer')
 const pageOptions = inject('page')
+// 评论面板开关（由根组件 provide）
+const showCommentPanel = inject('showCommentPanel', ref(false))
 
 // 页面大小
 const pageSize = $computed(() => {
@@ -231,6 +242,35 @@ watch(
   height: 100%;
   display: flex;
   position: relative;
+}
+
+// 左侧面板区：TOC + 评论（上下排列）
+.umo-side-panels {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  flex-shrink: 0;
+  // 单面板时占满左侧高度；两面板同时开时各自按内容/flex 分配
+  > .umo-toc-container {
+    flex-shrink: 0;
+    max-height: 50%;
+  }
+  > .umo-comment-container {
+    flex: 1;
+    min-height: 0;
+  }
+  // 只有一个面板时让它占满
+  &:has(> .umo-toc-container:only-child) {
+    > .umo-toc-container {
+      max-height: 100%;
+      flex: 1;
+    }
+  }
+  &:has(> .umo-comment-container:only-child) {
+    > .umo-comment-container {
+      flex: 1;
+    }
+  }
 }
 
 .umo-zoomable-container {

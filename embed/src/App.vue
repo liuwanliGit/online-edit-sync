@@ -12,46 +12,14 @@
     <div v-else-if="!configReady" class="embed-state embed-state-loading">
       <p>正在加载编辑器配置…</p>
     </div>
-    <!-- 编辑器 + 评论侧栏（协同 synced + 配置就绪后挂载） -->
+    <!-- 编辑器（协同 synced + 配置就绪后挂载） -->
     <div v-else class="embed-editor-wrap">
       <umo-editor
         ref="editorRef"
         v-bind="editorOptions"
         @created="onEditorCreated"
       >
-        <template #bubble_menu>
-          <BubbleButton
-            :get-editor="safeBubbleGetEditor"
-            @add="onBubbleAdd"
-          />
-        </template>
       </umo-editor>
-      <CommentSidebar
-        v-if="showCommentSidebar"
-        :comments="comments"
-        :active-comment-id="activeCommentId"
-        :pending-add="pendingAdd"
-        :busy="addBusy"
-        :current-user-id="currentUserId"
-        @add="onAddComment"
-        @cancel-add="onCancelAdd"
-        @reply="onReply"
-        @resolve="onResolve"
-        @delete="onDelete"
-        @focus-comment="onFocusComment"
-        @close="showCommentSidebar = false"
-      />
-      <!-- 常驻入口：浮动评论按钮（不依赖选中文本，可随时打开侧栏查看/管理评论） -->
-      <button
-        v-if="!showCommentSidebar"
-        class="embed-comment-fab"
-        type="button"
-        title="打开评论"
-        @click="showCommentSidebar = true"
-      >
-        <span class="embed-comment-fab-icon">💬</span>
-        <span v-if="comments.length" class="embed-comment-fab-badge">{{ comments.length }}</span>
-      </button>
     </div>
   </div>
 </template>
@@ -68,13 +36,6 @@ import * as Y from 'yjs'
 
 // 子路径前缀推导：引擎被外层 nginx 反代到子路径时，WS/convert 请求需带前缀
 import { withBasePath } from './utils/base-path'
-
-// 评论功能
-import { useComments } from './composables/useComments.js'
-import CommentSidebar from './components/comment/CommentSidebar.vue'
-import BubbleButton from './components/comment/BubbleButton.vue'
-import { Comment } from './extensions/comment-mark.js'
-import { CommentHighlight } from './extensions/comment-highlight.js'
 
 // ============ URL 参数契约 ============
 // GET /embed?doc=<docId>&token=<jwt>&mode=<edit|view>&lang=<zh-CN|en-US>&title=<文档标题>
@@ -107,13 +68,7 @@ const configReady = ref(false)
 const collaborators = ref([])
 provide('collaborators', collaborators)
 
-// 评论状态
-const showCommentSidebar = ref(false)
-const pendingAdd = ref(null) // { from, to, selectedText }
-const addBusy = ref(false)
-const currentUserId = ref('')
-
-// 当前用户信息（由 JWT 解析，供评论 author 使用 + awareness 推入）
+// 当前用户信息（由 JWT 解析，供 awareness 推入）
 const collabUserRef = ref({ name: '', color: '#888', role: 'editor', id: '' })
 
 // ============ 暴露编辑器到 window（同源父页面可同步直调） ============
@@ -171,6 +126,8 @@ const editorOptions = computed(() => {
       enableMarkdown: true,
       autoSave: { enabled: true, interval: 30000 },
       enableBubbleMenu: true,
+      // 文档 ID（供引擎内置评论功能使用，与协同 documentName 一致）
+      docId,
     },
     toolbar: {
       defaultMode: 'ribbon',
@@ -188,6 +145,12 @@ const editorOptions = computed(() => {
     // 协同模式：内容由 Yjs 驱动，禁用 UndoRedo（改用 Yjs 撤销栈），注入协同扩展
     disableExtensions: ['undoRedo'],
     extensions: collabExtensions.value,
+    // 当前用户信息（供引擎内置评论功能作为 author 使用）
+    user: {
+      id: collabUserRef.value.id,
+      name: collabUserRef.value.name,
+      color: collabUserRef.value.color,
+    },
     // 协同模式内容由服务端持久化，点保存给个提示即可
     onSave: async () => '已由服务端实时保存',
   // 工具栏「导出 Word」按钮：调 convert-server 转 docx 后直接触发浏览器下载
@@ -234,19 +197,6 @@ const editorOptions = computed(() => {
   return opts
 })
 
-// BubbleButton 取编辑器实例的安全包装：
-// bubble_menu 插槽会被 Umo Editor 在显示/隐藏时反复挂载卸载，挂载瞬间 editorRef.value
-// 可能为 null（编辑器组件未就绪）或 useEditor 方法尚未挂载。原内联箭头函数
-// `() => editorRef.value?.useEditor?.()` 在极端时序下仍可能让 watcher getter 抛错
-// （"Cannot read properties of null (reading 'value')"），这里显式 try/catch 兜底。
-function safeBubbleGetEditor() {
-  try {
-    return editorRef.value?.useEditor?.() || null
-  } catch {
-    return null
-  }
-}
-
 function onEditorCreated() {
   if (mode === 'view') {
     editorRef.value?.setReadOnly?.(true)
@@ -258,16 +208,6 @@ function onEditorCreated() {
   }
   // 通知父页面编辑器已就绪（跨域场景父页面据此知道可发 postMessage）
   postToParent({ type: 'ready', doc: docId })
-
-  // 点击编辑器正文取消高亮（失焦行为）
-  const editor = editorRef.value?.useEditor?.()
-  if (editor) {
-    editor.view.dom.addEventListener('mousedown', clearActive)
-  }
-
-  // 加载评论 + 连接 SSE（协同连接就绪后才请求，确保后端能正确识别文档）
-  loadComments()
-  connectSSE()
 }
 
 // ============ 协同模式：建立 Yjs + HocuspocusProvider ============
@@ -296,7 +236,6 @@ async function setupCollab() {
     color: COLLAB_COLORS[Math.floor(Math.random() * COLLAB_COLORS.length)],
     role: userRole,
   }
-  currentUserId.value = collabUserRef.value.id
 
   const provider = new HocuspocusProvider({
     url: getCollabWsUrl(),
@@ -367,148 +306,7 @@ async function setupCollab() {
         return [yCursorPlugin(provider.awareness)]
       },
     }),
-    // Comment mark：选中文字时 setMark('comment', { commentId })，位置随 Yjs 自动同步
-    Comment,
-    // active 高亮：点击侧栏评论时高亮对应 mark 文字
-    CommentHighlight.configure({
-      getActiveComment: () => activeCommentId.value,
-    }),
   ]
-}
-
-// ============ 评论功能 ============
-const {
-  comments,
-  activeCommentId,
-  loadComments,
-  connectSSE,
-  addComment,
-  replyComment,
-  deleteComment,
-  resolveComment,
-  setActive,
-  clearActive,
-  dispose: disposeComments,
-} = useComments({
-  docId,
-  getAuthor: () => collabUserRef.value,
-  getCommentApiBase: () => parentConfig.value.commentApiBase,
-})
-
-// activeCommentId 变化 → 触发 ProseMirror decorations 重算（高亮对应 mark）
-watch(activeCommentId, () => {
-  const editor = editorRef.value?.useEditor?.()
-  if (editor?.view) {
-    // dispatch 空 tr 让 CommentHighlight 的 decorations 重算
-    editor.view.dispatch(editor.state.tr)
-  }
-})
-
-// 气泡菜单"评论"按钮：记录选区 + commentId，打开侧栏
-// from/to 仅用于 apply mark 时定位，不持久化到后端
-function onBubbleAdd({ commentId, from, to, selectedText }) {
-  pendingAdd.value = { commentId, from, to, selectedText }
-  showCommentSidebar.value = true
-}
-
-// 发表评论：先给选区文字打上 comment mark（commentId），再 POST 持久化
-async function onAddComment(content) {
-  if (!pendingAdd.value) return
-  addBusy.value = true
-  try {
-    const { commentId, from, to, selectedText } = pendingAdd.value
-    // 1. apply comment mark 到选区（通过 Yjs 协同同步给所有客户端）
-    const editor = editorRef.value?.useEditor?.()
-    if (editor) {
-      editor
-        .chain()
-        .focus()
-        .setTextSelection({ from, to })
-        .setMark('comment', { commentId })
-        .run()
-    }
-    // 2. POST 持久化（id = commentId，后端直接用作主键）
-    await addComment({ id: commentId, selectedText, content })
-    pendingAdd.value = null
-  } catch (e) {
-    console.error('[comments] 发表评论失败', e?.message || e)
-    throw e
-  } finally {
-    addBusy.value = false
-  }
-}
-
-function onCancelAdd() {
-  pendingAdd.value = null
-}
-
-async function onReply({ id, content }) {
-  await replyComment(id, content)
-}
-
-// 标记解决/取消解决：同时更新 mark 的 resolved 属性（变灰/恢复）
-async function onResolve({ id, resolved }) {
-  await resolveComment(id, resolved)
-  updateCommentMark(id, { resolved })
-}
-
-// 删除评论：同时从文档中移除对应 comment mark
-async function onDelete(id) {
-  await deleteComment(id)
-  removeCommentMark(id)
-}
-
-// ============ Comment Mark 操作工具 ============
-// 遍历文档，找到 commentId 对应的 mark range，执行回调（setMark 更新属性 / removeMark 删除）
-function withCommentMark(commentId, fn) {
-  const editor = editorRef.value?.useEditor?.()
-  if (!editor) return
-  const { state } = editor
-  let found = false
-  state.doc.descendants((node, pos) => {
-    if (found) return false
-    if (!node.isText) return
-    const mark = node.marks.find(
-      (m) => m.type.name === 'comment' && m.attrs.commentId === commentId,
-    )
-    if (mark) {
-      // 链式操作：选中该 range，然后 setMark 更新属性或 removeMark 删除
-      const chain = editor.chain().setTextSelection({ from: pos, to: pos + node.nodeSize })
-      fn(chain, mark)
-      found = true
-      return false
-    }
-  })
-}
-
-// 更新 mark 属性（如 resolved）
-function updateCommentMark(commentId, attrs) {
-  withCommentMark(commentId, (chain) => {
-    chain.setMark('comment', { commentId, ...attrs }).run()
-  })
-}
-
-// 移除 mark
-function removeCommentMark(commentId) {
-  withCommentMark(commentId, (chain) => {
-    chain.unsetMark('comment').run()
-  })
-}
-
-// 滚动定位到评论对应的 mark（侧栏点击评论时调用）
-function scrollToComment(commentId) {
-  const editorDom = editorRef.value?.useEditor?.()?.view?.dom
-  if (!editorDom) return
-  const el = editorDom.querySelector(`[data-comment-id="${commentId}"]`)
-  if (el) {
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  }
-}
-
-// 点击侧栏评论卡片：设 active 高亮 + 滚动定位
-function onFocusComment(id) {
-  setActive(id)
-  scrollToComment(id)
 }
 
 // ============ postMessage 交互协议（跨域场景） ============
@@ -726,7 +524,6 @@ onUnmounted(() => {
   if (window.__UMO_EDITOR__ === editorRef.value) {
     delete window.__UMO_EDITOR__
   }
-  disposeComments()
 })
 </script>
 
@@ -764,85 +561,5 @@ body {
   position: relative;
   width: 100%;
   height: 100%;
-}
-/* 评论侧栏：在编辑器右侧以绝对定位叠加 */
-/* z-index > Umo Editor .umo-main-floating-actions(200)，避免右下角浮动操作遮挡侧栏 */
-/* 注意：App.vue 用的是 <style>（非 scoped），不能写 :deep()——:deep 只在 scoped 中生效。
-   这里直接用全局选择器 .umo-cmt-sidebar 即可覆盖到 CommentSidebar 组件根元素。 */
-.embed-editor-wrap .umo-cmt-sidebar {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 320px;
-  height: 100%;
-  z-index: 300;
-  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.08);
-}
-/* 常驻浮动评论入口按钮 */
-/* z-index 必须 > Umo Editor 的 .umo-main-floating-actions（z-index:200），否则会被
-   那个右下角浮动操作容器遮挡导致点击不到。放在左侧底部避开 floating-actions 区域。 */
-.embed-comment-fab {
-  position: absolute;
-  left: 16px;
-  bottom: 48px;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: none;
-  background: var(--umo-primary-color, #4d8ee0);
-  color: #fff;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
-  z-index: 300;
-  padding: 0;
-  transition: transform 0.15s, box-shadow 0.15s;
-}
-.embed-comment-fab:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.24);
-}
-.embed-comment-fab-icon {
-  font-size: 18px;
-  line-height: 1;
-}
-.embed-comment-fab-badge {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  background: #e5403a;
-  color: #fff;
-  font-size: 11px;
-  line-height: 18px;
-  text-align: center;
-  font-weight: 600;
-}
-/* ============ 评论 Mark 样式 ============ */
-/* App.vue 用 <style>（非 scoped），直接写全局选择器，不能用 :deep() */
-
-/* 评论 mark：始终可见的淡色底色 */
-.umo-comment-mark {
-  background: rgba(77, 142, 224, 0.12);
-  border-radius: 2px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-/* 已解决的评论：灰色 + 删除线 */
-.umo-comment-mark.resolved {
-  background: rgba(0, 0, 0, 0.05);
-  color: #999;
-  text-decoration: line-through;
-}
-/* active 高亮（点击侧栏评论时，decoration 叠加） */
-.umo-comment-mark.umo-comment-active,
-.umo-comment-active {
-  background: rgba(77, 142, 224, 0.28) !important;
-  box-shadow: 0 0 0 1px rgba(77, 142, 224, 0.4);
 }
 </style>

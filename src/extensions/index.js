@@ -35,6 +35,7 @@ import Bookmark from './bookmark'
 import BreakMarks from './break-marks'
 import BulletList from './bullet-list'
 import Callout from './callout'
+import { Comment, CommentHighlight } from './comment'
 import CodeBlock from './code-block'
 import Columns from './columns'
 import Datetime from './datetime'
@@ -115,7 +116,12 @@ const nodeTypes = [
   'inlineMath',
 ]
 
-export const getDefaultExtensions = ({ container, options, uploadFileMap }) => {
+export const getDefaultExtensions = ({
+  container,
+  options,
+  uploadFileMap,
+  getActiveComment = () => null,
+}) => {
   const {
     page,
     document: doc,
@@ -351,6 +357,18 @@ export const getDefaultExtensions = ({ container, options, uploadFileMap }) => {
         buildInExtensions.splice(i, 1)
       }
     }
+  }
+
+  // 评论扩展（comment mark + active 高亮）
+  // 默认开启，可通过 comments.enabled: false 或 disableExtensions: ['comment'] 关闭
+  const commentsEnabled =
+    options.value.comments?.enabled !== false &&
+    !disableExtensions?.includes('comment')
+  if (commentsEnabled) {
+    buildInExtensions.push(Comment)
+    buildInExtensions.push(
+      CommentHighlight.configure({ getActiveComment }),
+    )
   }
 
   return buildInExtensions

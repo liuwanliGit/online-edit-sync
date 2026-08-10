@@ -34,7 +34,10 @@ COPY vite.config.js ./
 
 # 构建脚本需要 src/utils/copyright.js（已在 src/ 内）。
 # husky 的 prepare 钩子在容器内无意义，跳过。
-RUN npm install --ignore-scripts && npm run build
+# 用国内 npm 镜像加速依赖下载
+RUN npm config set registry https://registry.npmmirror.com \
+    && npm install --ignore-scripts \
+    && npm run build
 
 
 # ===========================================================================
@@ -54,6 +57,7 @@ COPY embed/package.json embed/package-lock.json ./
 
 # install 前剔除 file:.. 依赖，避免 npm 深入上层仓库
 RUN node -e "const f='package.json';const p=JSON.parse(require('fs').readFileSync(f,'utf8'));delete p.dependencies['@umoteam/editor'];require('fs').writeFileSync(f,JSON.stringify(p,null,2))" \
+    && npm config set registry https://registry.npmmirror.com \
     && npm install --ignore-scripts --no-package-lock
 
 # 放入编辑器库产物（已构建好的 ESM bundle）
@@ -74,21 +78,31 @@ RUN npm run build
 FROM crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/node:22-bookworm-slim AS engine
 
 # 装运行时依赖：nginx（反代入口）+ supervisor（进程管理）
-# better-sqlite3 通过 install 脚本（prebuild-install）下载预编译二进制，无需 python/make/g++
+# 同时装 make/g++/python3：better-sqlite3 优先用 prebuild-install 下载预编译二进制，
+# 但容器网络无法访问 GitHub releases 时会回退到 node-gyp 源码编译，需要 make/g++/python3。
+# 先换国内镜像源加速 apt（容器内访问 deb.debian.org 很慢）
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' \
+        /etc/apt/sources.list.d/debian.sources 2>/dev/null \
+    || sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null \
+    || true
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends nginx supervisor ca-certificates \
+    && apt-get install -y --no-install-recommends \
+       nginx supervisor ca-certificates make g++ python3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # ---------- 协同服务（collab-server）----------
 COPY collab-server/package.json collab-server/package-lock.json ./collab-server/
-COPY collab-server/server.js collab-server/storage.js ./collab-server/
+COPY collab-server/server.js collab-server/storage.js collab-server/comment-storage.js ./collab-server/
 
 WORKDIR /app/collab-server
 # 注意：不能用 --ignore-scripts。better-sqlite3 的 install 脚本负责下载与当前 Node ABI
-# 匹配的预编译 .node 二进制（prebuild-install），跳过会导致运行时找不到原生模块。
-RUN npm install --omit=dev
+# 匹配的预编译 .node 二进制（prebuild-install），下载失败时回退到 node-gyp 源码编译。
+# 用国内 npm 镜像加速依赖下载
+RUN npm config set registry https://registry.npmmirror.com \
+    && npm install --omit=dev \
+    && npm config delete registry
 WORKDIR /app
 
 # ---------- 文档转换服务（convert-server）----------
@@ -96,7 +110,9 @@ COPY convert-server/package.json convert-server/package-lock.json ./convert-serv
 COPY convert-server/server.js ./convert-server/
 
 WORKDIR /app/convert-server
-RUN npm install --omit=dev
+RUN npm config set registry https://registry.npmmirror.com \
+    && npm install --omit=dev \
+    && npm config delete registry
 WORKDIR /app
 
 # ---------- embed 前端静态资源 ----------

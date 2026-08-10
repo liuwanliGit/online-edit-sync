@@ -15,6 +15,8 @@
  */
 import { Mark } from '@tiptap/core'
 
+export { CommentHighlight } from './highlight'
+
 export const Comment = Mark.create({
   name: 'comment',
 

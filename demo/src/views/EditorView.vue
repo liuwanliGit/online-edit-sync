@@ -248,14 +248,9 @@ const guideUrl = 'https://github.com/umoteam/umo-editor/blob/main/EMBED_INTEGRAT
 // embed 挂载时向父页面请求 { type:'request-config' }，父页面回传 { type:'config', payload }。
 // 模板/用户目录/书签显示/分享/CDN 全部由业务系统控制，URL 不承载配置，无长度限制。
 //
-// commentApiBase：评论 REST + SSE 后端根地址（不含 /api，由 embed 内部拼接）。
-// 评论后端跑在 demo-server，而非引擎，必须显式下发，否则 embed 会按 iframe 同源
-// （引擎容器，如 localhost:9999）发评论请求 → 引擎不认识评论路由 → 404。
-// 必须用绝对地址：iframe 的 origin 是引擎（不同端口），相对路径会落在引擎上。
-// getApiBase() 在 nginx 反代场景返回 '/oes'，拼上父页面 origin 得到
-// http://<demo host>:9998/oes，最终请求 /oes/api/documents/:id/comments 命中 demo nginx。
+// 注意：评论功能现已由引擎内置（同源调用 /api/documents/:docId/comments），
+// 不再需要下发 commentApiBase。
 const editorConfig = {
-  commentApiBase: `${window.location.origin}${getApiBase()}`,
   // 模板：业务系统维护内容，编辑器只负责插入
   templates: [
     {

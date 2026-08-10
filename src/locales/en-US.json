@@ -703,6 +703,20 @@
     "hide": "Hide Document Map",
     "empty": "No Document Map Available"
   },
+  "comment": {
+    "title": "Comments",
+    "add": "Comment",
+    "placeholder": "Write your comment…",
+    "replyPlaceholder": "Write your reply…",
+    "submit": "Submit",
+    "cancel": "Cancel",
+    "reply": "Reply",
+    "resolve": "Mark Resolved",
+    "unresolve": "Unmark Resolved",
+    "delete": "Delete",
+    "resolved": "Resolved",
+    "empty": "Select text and click the \"Comment\" button to add a comment"
+  },
   "spellcheck": {
     "enable": "Enable Spell Check",
     "disable": "Disable Spell Check"

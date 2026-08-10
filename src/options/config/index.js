@@ -65,6 +65,8 @@ export default {
       enabled: true,
       interval: 300000,
     },
+    // 文档 ID（用于评论 API 标识文档归属，协同场景下应与 Hocuspocus documentName 一致）
+    docId: '',
   },
   echarts: {
     mode: 1,
@@ -175,6 +177,11 @@ export default {
   },
   user: {},
   users: [],
+  // 评论功能（引擎内置，默认开启）
+  comments: {
+    enabled: true, // 是否启用评论功能（false 时完全移除评论 UI + mark 扩展）
+    apiBase: '', // 评论 API 基地址（空 = 同源，引擎内置场景留空）
+  },
   // When left as null, mention suggestions only match the local users list.
   onMentionSearch: null,
   extensions: [],

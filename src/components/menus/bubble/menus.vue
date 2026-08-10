@@ -142,7 +142,9 @@
     />
   </template>
   <template v-else>
-    <menus-toolbar-base-font-size :select="false" />
+    <!-- editor 模式：完整文本格式工具栏 -->
+    <template v-if="editor.isEditable">
+      <menus-toolbar-base-font-size :select="false" />
     <div
       v-if="!disable('font-size-increase') || !disable('font-size-decrease')"
       class="umo-bubble-menu-divider"
@@ -167,6 +169,19 @@
       <div class="umo-bubble-menu-divider"></div>
       <menus-bubble-node-delete />
     </template>
+    </template>
+    <!-- 评论按钮（editor + viewer 均可，选中文本时显示） -->
+    <template v-if="commentsEnabled">
+      <div class="umo-bubble-menu-divider"></div>
+      <button
+        class="umo-bubble-menu-comment-btn"
+        @mousedown.prevent="onCommentMousedown"
+        @click="onCommentClick"
+      >
+        <icon name="comment" />
+        {{ t('comment.add') }}
+      </button>
+    </template>
   </template>
   <template v-if="editor?.state?.selection">
     <slot
@@ -181,8 +196,53 @@
 import { NodeSelection, TextSelection } from '@tiptap/pm/state'
 import { CellSelection } from '@tiptap/pm/tables'
 
+const { t } = useI18n()
 const editor = inject('editor')
 const options = inject('options')
+
+// 评论功能（引擎内置）
+const commentsEnabled = inject('commentsEnabled', ref(false))
+const startComment = inject('commentStart', () => {})
+
+// 缓存点击瞬间的选区：mousedown 时浏览器可能折叠 DOM 选区，
+// onClick 时 editor.state.selection 可能已经 empty。
+let cachedSelection = null
+
+function onCommentMousedown() {
+  const ed = editor.value
+  if (!ed?.state) return
+  const { from, to, empty } = ed.state.selection
+  if (empty) {
+    cachedSelection = null
+    return
+  }
+  const selectedText = ed.state.doc
+    .textBetween(from, to, '\n')
+    .slice(0, 2000)
+  cachedSelection = { from, to, selectedText }
+}
+
+function onCommentClick() {
+  const ed = editor.value
+  // 优先用 mousedown 缓存的选区；兜底取实时选区
+  const sel = cachedSelection || (() => {
+    if (!ed?.state) return null
+    const { from, to, empty } = ed.state.selection
+    if (empty) return null
+    const selectedText = ed.state.doc
+      .textBetween(from, to, '\n')
+      .slice(0, 2000)
+    return { from, to, selectedText }
+  })()
+  cachedSelection = null
+  if (!sel) return
+  // 客户端生成 commentId（用作 comment mark 的 data-comment-id + 后端评论主键）
+  const commentId =
+    typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `cmt-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
+  startComment({ commentId, ...sel })
+}
 
 const disable = (name) => {
   return options.value.disableExtensions.includes(name)
@@ -226,6 +286,28 @@ const getCurrentNode = (type) => {
   margin: 0 5px 0 0;
   &:last-child:is(.umo-bubble-menu-divider) {
     display: none;
+  }
+}
+.umo-bubble-menu-comment-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: var(--umo-text-color);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 6px;
+  height: var(--td-comp-size-xs, 28px);
+  line-height: 1;
+  border-radius: var(--umo-radius);
+  white-space: nowrap;
+  .umo-icon {
+    font-size: 16px;
+  }
+  &:hover {
+    background: var(--umo-button-hover-background);
+    color: var(--umo-primary-color);
   }
 }
 </style>

@@ -56,10 +56,13 @@ const defaultLineHeight = $computed(
 )
 
 const container = inject('container')
+// 评论 activeCommentId（由根组件 index.vue provide），用于 CommentHighlight 装饰
+const activeCommentId = inject('activeCommentId', ref(null))
 const extensions = getDefaultExtensions({
   container,
   options,
   uploadFileMap,
+  getActiveComment: () => activeCommentId.value,
 })
 
 // 同步文档内容

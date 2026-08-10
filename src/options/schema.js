@@ -517,6 +517,11 @@ export default new ObjectSchema({
           },
         },
       },
+      docId: {
+        merge: 'replace',
+        validate: 'string',
+        required: false,
+      },
     },
   },
   echarts: {
@@ -677,6 +682,23 @@ export default new ObjectSchema({
       })
     },
     required: false,
+  },
+  comments: {
+    merge: 'replace',
+    validate: 'object',
+    required: false,
+    schema: {
+      enabled: {
+        merge: 'replace',
+        validate: 'boolean',
+        required: false,
+      },
+      apiBase: {
+        merge: 'replace',
+        validate: 'string',
+        required: false,
+      },
+    },
   },
   onMentionSearch: {
     merge: 'replace',
