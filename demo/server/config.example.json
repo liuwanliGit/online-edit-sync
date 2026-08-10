@@ -4,8 +4,8 @@
   "_port": "本服务（demo 后端）监听端口，默认 4001",
   "port": 4001,
 
-  "_engineUrl": "Umo Editor 引擎地址。本服务代理签 JWT 时调引擎 /api/token。默认 http://localhost:9999",
-  "engineUrl": "http://localhost:9999",
+  "_engineUrl": "Umo Editor 引擎地址（必须带 /oes 前缀，引擎挂在 /oes 下）。本服务代理签 JWT 时调引擎 /api/token，实际请求 <engineUrl>/api/token。默认 http://localhost:9999/oes",
+  "engineUrl": "http://localhost:9999/oes",
 
   "_apiKey": "引擎 API Key。与引擎启动时的 UMO_API_KEY 环境变量保持一致。引擎 dev 模式可留空。本服务调引擎 /api/token 时以此鉴权",
   "apiKey": "",

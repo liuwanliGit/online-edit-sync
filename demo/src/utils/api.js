@@ -11,18 +11,28 @@
  *
  * 地址优先级（高 → 低）：
  *   1. window.__UMO_CONFIG__.apiBase  —— 来自 /config.js（部署后可编辑，推荐）
+ *      · 显式 URL（如 http://localhost:4001）→ 走该地址
+ *      · 空字符串 ''                          → 同源应用前缀 /oes（nginx /oes/api/ 反代场景）
  *   2. window.__UMO_API_URL__         —— 旧的全局变量覆盖（兼容）
  *   3. 兜底 http://localhost:4001      —— 本地开发默认值
+ *
+ * 说明：应用统一挂在 /oes 前缀下。apiBase 为空时返回 '/oes'，
+ * 这样请求拼成 /oes/api/documents，命中 demo 容器 nginx 的 location /oes/api/。
  */
 
 const FALLBACK = 'http://localhost:4001'
+// 应用固定前缀（与 vite base、nginx location、routerBase 保持一致）
+const APP_PREFIX = '/oes'
 
 export function getApiBase() {
   const w = typeof window !== 'undefined' ? window : undefined
-  // 优先读 config.js
-  const fromConfig = w?.__UMO_CONFIG__?.apiBase
-  if (fromConfig) {
-    return String(fromConfig).trim().replace(/\/+$/, '')
+  // 优先读 config.js：__UMO_CONFIG__ 存在表示 config.js 已加载
+  if (w?.__UMO_CONFIG__) {
+    const apiBase = w.__UMO_CONFIG__.apiBase
+    // 显式配置了值 → 用该值（strip 末尾斜杠）
+    if (apiBase) return String(apiBase).trim().replace(/\/+$/, '')
+    // __UMO_CONFIG__ 存在但 apiBase 为空 → 同源应用前缀（nginx /oes/api/ 反代场景）
+    return APP_PREFIX
   }
   // 兼容旧的全局变量
   if (w?.__UMO_API_URL__) {

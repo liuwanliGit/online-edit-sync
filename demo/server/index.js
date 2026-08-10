@@ -22,6 +22,7 @@ import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import http from 'http'
 import { v4 as uuidv4 } from 'uuid'
+import { createCommentStore } from './comments.js'
 
 // 加载同目录 config.json（不存在则用空对象，全部走环境变量/默认值）
 import configFile from './config.json' with { type: 'json' }
@@ -63,11 +64,14 @@ const insertStmt = db.prepare(`
 const deleteStmt = db.prepare('DELETE FROM documents WHERE id = ?')
 const touchStmt = db.prepare('UPDATE documents SET updated_at = @updatedAt WHERE id = @id')
 
+// 评论 store（REST + SSE + comments 表），路由在下方交由 commentStore.handle 处理
+const commentStore = createCommentStore(db)
+
 // ============ HTTP 工具 ============
 const JSON_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, x-api-key',
 }
 
@@ -113,6 +117,9 @@ const server = http.createServer(async (req, res) => {
   const { pathname } = url
 
   try {
+    // 评论相关路由（REST + SSE）优先交由 commentStore 处理
+    if (await commentStore.handle(req, res, url)) return
+
     // GET /api/documents —— 文档列表
     if (pathname === '/api/documents' && req.method === 'GET') {
       const rows = listStmt.all()

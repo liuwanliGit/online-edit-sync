@@ -1,0 +1,53 @@
+# =============================================================================
+# Umo Editor 全栈编排（仅启动已导入镜像，无构建）
+# 启动命令：docker compose up -d
+# =============================================================================
+
+services:
+  umo-editor-engine:
+    image: umo-editor-engine:latest          # 使用已导入的引擎镜像
+    container_name: umo-editor-engine
+    ports:
+      - "9999:9999"
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-umo-collab-secret-dev-only}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-24h}
+      UMO_API_KEY: ${UMO_API_KEY:-}          # 留空则无鉴权，生产务必设置
+    volumes:
+      - umo-collab-data:/app/collab-server/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "node -e \"fetch('http://127.0.0.1:9999/oes/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  umo-editor-demo:
+    image: umo-editor-demo:latest            # 使用已导入的 demo 镜像
+    container_name: umo-editor-demo
+    ports:
+      - "9998:9998"
+    environment:
+      UMO_ENGINE_URL: http://umo-editor-engine:9999/oes
+      UMO_API_KEY: ${UMO_API_KEY:-}
+      UMO_ENGINE_PUBLIC_URL: ${UMO_ENGINE_PUBLIC_URL:-http://localhost:9999/oes}
+    volumes:
+      - umo-demo-data:/app/server/data
+    depends_on:
+      - umo-editor-engine
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "node -e \"fetch('http://127.0.0.1:9998/oes/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  umo-collab-data:
+  umo-demo-data:

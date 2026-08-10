@@ -100,7 +100,9 @@ RUN npm install --omit=dev
 WORKDIR /app
 
 # ---------- embed 前端静态资源 ----------
-COPY --from=embed-builder /build/embed/dist /app/public
+# 放到 /app/public/oes/ 下：URL /oes/assets/x.js 用 root /app/public 自然映射，
+# 无需 nginx alias/rewrite 处理前缀（alias 与 try_files/rewrite 有已知兼容问题）
+COPY --from=embed-builder /build/embed/dist /app/public/oes
 
 # ---------- 配置文件 ----------
 # nginx.conf 是完整的顶层配置（含 events/http 块），直接覆盖主配置

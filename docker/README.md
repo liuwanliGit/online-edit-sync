@@ -4,21 +4,25 @@
 
 引擎**不含** demo 前端 / demo-server / 登录页 / 文档列表——这些是业务系统自己的职责。接入方通过 **iframe 嵌入 `/embed`** 使用编辑器。
 
+> 想直接跑一个完整的示例（含登录页 / 文档列表 / 编辑器页）？跳到 [全栈部署（引擎 + 瘦客户端示例）](#全栈部署引擎--瘦客户端示例)。
+
 ## 架构
+
+应用统一挂在 **`/oes` 前缀**下（固定烧进镜像，前端 vite base 与容器 nginx location 都用 `/oes`）。
 
 ```
 浏览器 ──:9999──► nginx
-                  ├─ /embed                → embed 前端（纯编辑器页，iframe 着陆页）
-                  ├─ /                     → 根路径也返回 embed（非登录页）
-                  ├─ /api/token            → 协同服务 HTTP 签 JWT (:4000，需 x-api-key)
-                  ├─ /api/health           → 协同服务健康检查 (:4000)
-                  ├─ /api/convert/         → 转换服务 HTML→docx (:4002)
-                  └─ /collab (WebSocket)   → 协同服务 Yjs 实时同步 (:4000)
+                  ├─ /oes/embed            → embed 前端（纯编辑器页，iframe 着陆页）
+                  ├─ /                     → 根路径跳转到 /oes/embed
+                  ├─ /oes/api/token        → 协同服务 HTTP 签 JWT (:4000，需 x-api-key)
+                  ├─ /oes/api/health       → 协同服务健康检查 (:4000)
+                  ├─ /oes/api/convert/     → 转换服务 HTML→docx (:4002)
+                  └─ /oes/collab (WebSocket) → 协同服务 Yjs 实时同步 (:4000)
 
 容器内进程（supervisor 托管）：nginx + collab-server + convert-server
 ```
 
-embed 前端是同源服务，WS 地址由 `location.host` 推导（`ws://host/collab`），无需运行时全局变量注入。
+embed 前端是同源服务，WS 地址由 `location.host` + `base-path.js` 自动推导（`ws://host/oes/collab`），无需运行时全局变量注入。
 
 ## 快速开始
 
@@ -28,10 +32,10 @@ bash docker/build.sh up
 ```
 
 启动后：
-- 健康检查：`curl http://localhost:9999/api/health` → `{"ok":true,...}`
-- iframe 嵌入：`http://localhost:9999/embed?doc=<docId>&token=<jwt>&mode=edit`
+- 健康检查：`curl http://localhost:9999/oes/api/health` → `{"ok":true,...}`
+- iframe 嵌入：`http://localhost:9999/oes/embed?doc=<docId>&token=<jwt>&mode=edit`
 
-> 引擎根路径直接打开会显示「缺少 doc/token 参数」——这是预期行为，引擎只服务于 iframe 嵌入，不提供用户可直接访问的页面。完整接入示例见仓库 `demo/`（瘦客户端源码）。
+> 引擎根路径 `/` 会自动跳转到 `/oes/embed`；直接打开 `/oes/embed` 会显示「缺少 doc/token 参数」——这是预期行为，引擎只服务于 iframe 嵌入，不提供用户可直接访问的页面。完整接入示例见仓库 `demo/`（瘦客户端源码）。
 
 ## 命令一览
 
@@ -112,6 +116,7 @@ docker compose -f docker/docker-compose.yml down -v
 | `docker/docker-compose.yml` | 编排 + 数据卷 + 环境变量 + 健康检查 |
 | `docker/build.bat` | Windows 一键脚本 |
 | `docker/build.sh` | Linux/macOS/Git Bash 一键脚本 |
+| `docker/external-nginx.example.conf` | 外层反代示例（单域名子路径部署 demo + 引擎） |
 | `.dockerignore` | 构建上下文排除项 |
 
 ## 构建说明（多阶段）
@@ -120,24 +125,157 @@ docker compose -f docker/docker-compose.yml down -v
 2. **embed-builder**：embed 通过 `file:..` 引用上层 `dist/`，`npm run build` 产出 `embed/dist/`（纯编辑器页静态资源）
 3. **engine**：`apt-get install nginx supervisor`，`npm install --omit=dev` 装两个服务端依赖（better-sqlite3 用 linux-x64 预编译二进制），复制 embed 静态资源，supervisor 托管三进程
 
+## 全栈部署（引擎 + 瘦客户端示例）
+
+如果服务器没有 Node 环境、也不想装，可以把**引擎 + demo 示例**一起用 docker compose 部署。会启动两个容器：
+
+```
+浏览器 ──:9998──► demo 容器（umo-editor-demo）
+                   ├─ /oes/          → demo 前端（登录 / 文档列表 / 编辑器页 / 文档页）
+                   └─ /oes/api/      → demo 后端（文档元数据 + 代理签 JWT + 接收导出）:4001
+       ──:9999──► 引擎容器（umo-editor-engine）
+                   └─ /oes/embed 等  → 编辑器引擎（demo 前端通过 iframe 嵌入）
+```
+
+### 一键启动
+
+```bash
+docker compose -f docker/docker-compose.yml up -d --build
+```
+
+启动后浏览器访问 **http://localhost:9998/oes/** → 登录（随便填用户名）→ 文档列表 → 打开文档 → 协同编辑。
+
+> 访问 `http://localhost:9998/`（根路径）会自动跳转到 `/oes/`。
+
+### 环境变量
+
+除引擎的环境变量外，demo 容器额外使用：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `UMO_ENGINE_URL` | `http://umo-editor-engine:9999` | demo 后端 → 引擎（容器内通信，一般不用改） |
+| `UMO_ENGINE_PUBLIC_URL` | `http://localhost:9999/oes` | **浏览器**访问引擎的地址（写入前端 config.js，iframe 用）。远程部署改成 `http://<服务器IP>:9999/oes` |
+| `UMO_API_KEY` | 空 | 与引擎一致，demo 后端代理签 JWT 时带 |
+
+> ⚠️ `UMO_ENGINE_PUBLIC_URL` 是**浏览器**加载 iframe 用的地址，必须是用户浏览器能访问到的引擎地址（**带 `/oes` 前缀**）。本机部署用默认 `http://localhost:9999/oes` 即可；部署到服务器上改成 `http://<服务器IP或域名>:9999/oes`。
+
+覆盖方式（在仓库根目录建 `.env`）：
+
+```bash
+cat > .env <<EOF
+UMO_API_KEY=your-strong-random-key
+UMO_ENGINE_PUBLIC_URL=http://192.168.1.100:9999/oes
+JWT_SECRET=your-strong-jwt-secret
+EOF
+
+docker compose -f docker/docker-compose.yml up -d --build
+```
+
+### 端口
+
+| 容器 | 对外端口 | 用途 |
+|---|---|---|
+| `umo-editor-demo` | 9998 | demo 示例（浏览器访问入口） |
+| `umo-editor-engine` | 9999 | 引擎（demo iframe 嵌入） |
+
+改端口编辑 `docker-compose.yml` 的 `ports`。
+
+### 数据持久化
+
+| 卷 | 路径 | 内容 |
+|---|---|---|
+| `umo-collab-data` | 引擎 `/app/collab-server/data` | 协同文档 Yjs 二进制 |
+| `umo-demo-data` | demo `/app/server/data` | 文档元数据 SQLite + 回传的导出文件 |
+
+### demo 镜像文件说明
+
+| 文件 | 作用 |
+|---|---|
+| `demo/docker/Dockerfile` | 两阶段构建（demo 前端 dist + 运行时镜像） |
+| `demo/docker/nginx.conf` | demo nginx（静态资源 + 反代 /api/） |
+| `demo/docker/supervisord.conf` | 容器内进程管理（nginx + demo-server） |
+| `demo/docker/entrypoint.sh` | 启动前根据环境变量生成前端 config.js |
+
+### 改 demo 地址（部署后）
+
+demo 镜像部署后，**改引擎地址无需重新构建镜像**：
+
+```bash
+# 改 .env 里的 UMO_ENGINE_PUBLIC_URL，然后重启 demo 容器
+docker compose -f docker/docker-compose.yml up -d umo-editor-demo
+```
+
+容器启动时 `entrypoint.sh` 会重新生成 `/app/public/config.js`。
+
+---
+
+## 外层 nginx 反代部署（单域名，把编辑器挂到已有系统下）
+
+### 设计原则：固定前缀 + 整段透传
+
+应用前缀 **`/oes` 已固定烧进镜像**（vite base + 容器 nginx location + 前端代码都用 `/oes`）。因此外层 nginx 的配置**极大简化**：
+
+- **直接端口访问**：`http://host:9998/oes/`、`http://host:9999/oes/embed` 即可，无需任何 nginx。
+- **外层 nginx 反代**：把 `/oes/` **整段透传**到容器即可（`proxy_pass` 不带尾斜杠，不剥前缀），因为容器内部已经认 `/oes` 前缀。
+
+相比旧方案（前端相对路径 + 外层 nginx 剥前缀 + 运行时推导），这套方案的优势：
+1. **部署只需改 host:port**——有无外层 nginx 都一样，只改 `UMO_ENGINE_PUBLIC_URL` 一个变量。
+2. **彻底消除"剥前缀"这个最容易出错的环节**——外层 nginx 透传即可。
+3. **history 路由深层刷新不 404**——vite base 是绝对路径 `/oes/`，资源引用稳定。
+
+### 外层 nginx 配置
+
+参考 [`external-nginx.example.conf`](./external-nginx.example.conf)。核心要点：
+
+- **`proxy_pass http://upstream`（不带尾斜杠）** → 整段路径透传 `/oes/...`，容器内 nginx 的 `location /oes/` 接收，**无需剥前缀**。
+- **WebSocket 的 `/oes/collab` 必须**单独 location 并显式设置 `Upgrade`/`Connection` 头。
+- **单端口区分 demo 和引擎**：引擎专属路径（`/oes/embed`、`/oes/collab`、`/oes/api/convert`、`/oes/api/token`）单独 location 转给引擎容器；其余 `/oes/` 兜底转给 demo 容器。
+
+### 部署步骤（外层 nginx 场景）
+
+1. 启动两个容器：`docker compose -f docker/docker-compose.yml up -d --build`
+2. 复制 `external-nginx.example.conf` 到宿主机 nginx，按实际域名/IP 改 upstream 和 server_name
+3. 设置 demo 容器环境变量（关键）：
+   ```bash
+   # .env 文件
+   UMO_ENGINE_PUBLIC_URL=https://your-domain/oes
+   ```
+   （指向外层 nginx 的 `/oes`，让 iframe 加载 `https://your-domain/oes/embed`）
+4. `nginx -s reload`
+
+### 验证清单
+
+| 检查项 | 期望 |
+|---|---|
+| 访问 `https://your-domain/oes/` | demo 登录页正常加载（无 404） |
+| 打开文档，iframe 指向 `/oes/embed?...` | 编辑器正常加载 |
+| F12 Network：`/oes/collab` WS | 101 Switching Protocols，协同编辑正常 |
+| F12 Network：`/oes/api/convert/docx` | 导出 Word 正常 |
+| demo 路由刷新（如 `/oes/documents/123`） | 不 404，history fallback 正常 |
+
+> 直接端口访问容器（`http://host:9998/oes/`）**仍完全支持**，无需外层 nginx。
+
+---
+
 ## 排错
 
 **访问 :9999 白屏 / 404**
 - `docker compose -f docker/docker-compose.yml logs nginx` 看 nginx 是否启动成功
 - 确认容器健康：`docker ps` 看 STATUS 是否 `healthy`
-- `curl http://localhost:9999/api/health` 应返回 `{"ok":true}`
+- `curl http://localhost:9999/oes/api/health` 应返回 `{"ok":true}`
+- 确认访问的是 `/oes/...` 路径（不是根路径 `/embed`，会 404）
 
 **协同连不上 / 编辑不同步**
 - iframe URL 是否带了 `doc` 和 `token` 参数
 - `docker compose -f docker/docker-compose.yml logs collab-server` 看协同服务日志
-- F12 Network 看 `ws://<host>:9999/collab` 是否连接
+- F12 Network 看 `ws://<host>:9999/oes/collab` 是否连接
 - token 是否过期（默认 24h），过期则重新让业务后端签发
 
 **JWT 鉴权失败**
 - 确认 `JWT_SECRET` 在容器重启后没变（变了会导致旧 token 失效）
 - token 里的 `doc` claim 必须与 iframe 的 `doc` 参数一致（引擎会校验）
 
-**`/api/token` 返回 401**
+**`/oes/api/token` 返回 401**
 - 镜像启动时设置了 `UMO_API_KEY`，但业务后端调用时没带 `x-api-key` header（或值不对）
 - dev 模式（`UMO_API_KEY` 未设置）不会校验
 

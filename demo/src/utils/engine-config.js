@@ -4,13 +4,15 @@
  * 地址优先级（高 → 低）：
  *   1. window.__UMO_CONFIG__.engineUrl  —— 来自 /config.js（部署后可编辑，推荐）
  *   2. window.__UMO_ENGINE_URL__        —— 旧的全局变量覆盖（兼容）
- *   3. 兜底 http://localhost:9999         —— 本地开发默认值
+ *   3. 兜底 http://localhost:9999/oes     —— 本地开发默认值
  *
- * 反代同源时（业务系统 nginx 把引擎反代到 /editor/ 子路径）：
- *   config.js 里 engineUrl: '/editor'
+ * 应用统一挂在 /oes 前缀下，engineUrl 应填带 /oes 前缀的地址：
+ *   本地开发：http://localhost:9999/oes
+ *   Docker：由 entrypoint 注入（UMO_ENGINE_PUBLIC_URL，默认 http://localhost:9999/oes）
+ *   外层 nginx：http://<nginx host>:<port>/oes
  */
 
-const FALLBACK = 'http://localhost:9999'
+const FALLBACK = 'http://localhost:9999/oes'
 
 function normalize(raw) {
   if (!raw) return FALLBACK

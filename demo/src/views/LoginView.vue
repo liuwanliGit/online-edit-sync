@@ -153,7 +153,9 @@ function onSubmit() {
     login(name.value, role.value)
     toast.success(`欢迎你，${name.value.trim()}`)
     const redirect = route.query.redirect
-    router.replace(typeof redirect === 'string' ? redirect : { name: 'documents' })
+    // 用对象形式 { path: redirect } 而非裸字符串：字符串会被当作站点绝对路径丢掉 base，
+    // 对象形式的 path 会正确应用 createWebHistory 的 base（子路径部署 '/oes' 时必需）
+    router.replace(typeof redirect === 'string' ? { path: redirect } : { name: 'documents' })
   }, 450)
 }
 </script>

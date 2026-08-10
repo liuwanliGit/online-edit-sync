@@ -9,7 +9,9 @@
   <body>
     <div id="app"></div>
     <!-- 运行时配置：普通 script 同步加载，保证 main.js 前 window.__UMO_CONFIG__ 就绪。
-         部署后直接改 dist/config.js 即可更新服务端与引擎地址，无需重新打包。 -->
+         用根绝对路径 /config.js：Vite 构建时会自动拼上 base 前缀（/oes/config.js），
+         且深层路由刷新时不会随当前 URL 漂移（相对路径 ./config.js 在 /oes/documents/:id
+         下会错误解析为 /oes/documents/config.js 导致 404）。 -->
     <script src="/config.js"></script>
     <script type="module" src="/src/main.js"></script>
   </body>

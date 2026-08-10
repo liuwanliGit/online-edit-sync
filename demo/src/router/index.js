@@ -5,7 +5,9 @@ import { isLoggedIn } from '@/store/auth'
 const routes = [
   {
     path: '/',
-    redirect: () => (isLoggedIn() ? '/documents' : '/login'),
+    // 用命名路由而非字符串路径：字符串路径（如 '/documents'）会被当作站点绝对路径，
+    // 不会自动拼接 createWebHistory 的 base，导致子路径部署（base='/oes'）时丢前缀。
+    redirect: () => (isLoggedIn() ? { name: 'documents' } : { name: 'login' }),
   },
   {
     path: '/login',
@@ -38,7 +40,12 @@ const routes = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  // 读取运行时注入的子路径前缀（来自 config.js），默认根路径 '/'。
+  // 应用统一挂在 /oes 前缀下，config.js 的 routerBase 固定为 '/oes'，
+  // 与 vite base、容器 nginx location 保持一致。
+  history: createWebHistory(
+    (typeof window !== 'undefined' && window.__UMO_CONFIG__?.routerBase) || '/',
+  ),
   routes,
   scrollBehavior() {
     return { top: 0 }

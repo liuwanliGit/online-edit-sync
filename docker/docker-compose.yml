@@ -1,11 +1,16 @@
 # =============================================================================
-# Umo Editor 引擎镜像编排（私有化交付）
+# Umo Editor 全栈编排（引擎 + 瘦客户端示例）
 # -----------------------------------------------------------------------------
 # 一键启动：docker compose -f docker/docker-compose.yml up -d --build
-# 访问：    http://localhost:9999/embed?doc=test&token=<jwt>
+#
+# 启动后：
+#   引擎容器  :9999  → 编辑器引擎（/oes/embed /oes/collab /oes/api/token /oes/api/convert）
+#   demo 容器  :9998  → 瘦客户端示例（登录 / 文档列表 / 编辑器页）
+#   浏览器访问    → http://localhost:9998/oes/
 #
 # 数据卷（持久化）：
-#   umo-collab-data → /app/collab-server/data （协同文档 Yjs 二进制）
+#   umo-collab-data → /app/collab-server/data （引擎：协同文档 Yjs 二进制）
+#   umo-demo-data   → /app/server/data        （demo：文档元数据 SQLite + 回传文件）
 # =============================================================================
 
 services:
@@ -29,10 +34,41 @@ services:
       - umo-collab-data:/app/collab-server/data
     restart: unless-stopped
     healthcheck:
-      # 健康检查走引擎 /api/health（由 collab-server 提供，nginx 反代）
+      # 健康检查走引擎 /oes/api/health（由 collab-server 提供，nginx 反代）
       test:
         - "CMD-SHELL"
-        - "node -e \"fetch('http://127.0.0.1:9999/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+        - "node -e \"fetch('http://127.0.0.1:9999/oes/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  umo-editor-demo:
+    build:
+      context: ..
+      dockerfile: demo/docker/Dockerfile
+    image: umo-editor-demo:latest
+    container_name: umo-editor-demo
+    ports:
+      - "9998:9998"
+    environment:
+      # demo-server → 引擎（容器内通信，用 compose 服务名，带 /oes 应用前缀）
+      UMO_ENGINE_URL: http://umo-editor-engine:9999/oes
+      # 与引擎的 UMO_API_KEY 保持一致（代理签 JWT 时带）
+      UMO_API_KEY: ${UMO_API_KEY:-}
+      # 浏览器访问引擎的地址（写入前端 config.js，iframe 用，带 /oes 前缀）。
+      # 默认 localhost:9999/oes 适合本机部署；远程部署改成 http://<服务器IP>:9999/oes
+      UMO_ENGINE_PUBLIC_URL: ${UMO_ENGINE_PUBLIC_URL:-http://localhost:9999/oes}
+    volumes:
+      # 文档元数据（SQLite）+ 接收的导出文件
+      - umo-demo-data:/app/server/data
+    depends_on:
+      - umo-editor-engine
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "node -e \"fetch('http://127.0.0.1:9998/oes/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
       interval: 30s
       timeout: 5s
       retries: 3
@@ -40,3 +76,5 @@ services:
 
 volumes:
   umo-collab-data:
+  umo-demo-data:
+

@@ -244,6 +244,51 @@ const tokenData = ref(null)
 const panelOpen = ref(true)
 const guideUrl = 'https://github.com/umoteam/umo-editor/blob/main/EMBED_INTEGRATION_GUIDE.md'
 
+// ============ 下发给 embed 的业务配置（postMessage config 握手） ============
+// embed 挂载时向父页面请求 { type:'request-config' }，父页面回传 { type:'config', payload }。
+// 模板/用户目录/书签显示/分享/CDN 全部由业务系统控制，URL 不承载配置，无长度限制。
+//
+// commentApiBase：评论 REST + SSE 后端根地址（不含 /api，由 embed 内部拼接）。
+// 评论后端跑在 demo-server，而非引擎，必须显式下发，否则 embed 会按 iframe 同源
+// （引擎容器，如 localhost:9999）发评论请求 → 引擎不认识评论路由 → 404。
+// 必须用绝对地址：iframe 的 origin 是引擎（不同端口），相对路径会落在引擎上。
+// getApiBase() 在 nginx 反代场景返回 '/oes'，拼上父页面 origin 得到
+// http://<demo host>:9998/oes，最终请求 /oes/api/documents/:id/comments 命中 demo nginx。
+const editorConfig = {
+  commentApiBase: `${window.location.origin}${getApiBase()}`,
+  // 模板：业务系统维护内容，编辑器只负责插入
+  templates: [
+    {
+      title: '工作任务',
+      description: '工作任务模板',
+      content:
+        '<h1>工作任务</h1><h3>任务名称：</h3><p>[任务的简短描述]</p><h3>负责人：</h3><p>[执行任务的个人姓名]</p><h3>截止日期：</h3><p>[任务需要完成的日期]</p><h3>任务详情：</h3><ol><li>[任务步骤1]</li><li>[任务步骤2]</li><li>[任务步骤3]...</li></ol><h3>目标：</h3><p>[任务需要达成的具体目标或结果]</p><h3>备注：</h3><p>[任何额外信息或注意事项]</p>',
+    },
+    {
+      title: '工作周报',
+      description: '工作周报模板',
+      content:
+        '<h1>工作周报</h1><h2>本周工作总结</h2><hr /><h3>已完成工作：</h3><ul><li>[任务1名称]：[简要描述任务内容及完成情况]</li><li>[任务2名称]：[简要描述任务内容及完成情况]</li><li>...</li></ul><h3>进行中工作：</h3><ul><li>[任务1名称]：[简要描述任务当前进度和下一步计划]</li><li>[任务2名称]：[简要描述任务当前进度和下一步计划]</li><li>...</li></ul><h3>问题与挑战：</h3><ul><li>[问题1]：[描述遇到的问题及当前解决方案或需要的支持]</li><li>[问题2]：[描述遇到的问题及当前解决方案或需要的支持]</li><li>...</li></ul><hr /><h2>下周工作计划</h2><h3>计划开展工作：</h3><ul><li>[任务1名称]：[简要描述下周计划开始的任务内容]</li><li>[任务2名称]：[简要描述下周计划开始的任务内容]</li><li>...</li></ul><h3>需要支持与资源：</h3><ul><li>[资源1]：[描述需要的资源或支持]</li><li>[资源2]：[描述需要的资源或支持]</li><li>...</li></ul>',
+    },
+  ],
+  // @提及用户目录（embed 本地过滤，输入 @ 触发）
+  users: [
+    { id: 'umodoc', label: 'Umo Team', bio: '核心开发者', color: 'var(--umo-primary-color)' },
+    { id: 'china-wangxu', label: 'china-wangxu', bio: '重要贡献者', color: 'var(--umo-primary-color)' },
+    { id: 'Cassielxd', label: 'Cassielxd', bio: '重要贡献者', color: 'var(--umo-primary-color)' },
+    { id: 'Goldziher', label: "Na'aman Hirschfeld" },
+    { id: 'SerRashin', label: 'SerRashin' },
+    { id: 'ChenErik', label: 'ChenErik' },
+    { id: 'testuser', label: '测试用户' },
+  ],
+  // 书签标记在页面中可见
+  page: { showBookmark: true },
+  // 分享链接：业务系统的文档页地址（而非 embed 的带 token URL，token 会过期）
+  shareUrl: typeof window !== 'undefined' ? window.location.href : '',
+  // 外部资源 CDN（公式/图表/播放器/文件图标等加载地址）
+  cdnUrl: 'https://cdn.umodoc.com',
+}
+
 // 交互结果
 const busy = ref({ sameOrigin: false, getContent: false, insertContent: false, export: false })
 const result = ref({ sameOrigin: '', getContent: '', insertContent: '', export: null })
@@ -300,6 +345,12 @@ function onIframeLoad() {
 function onMessage(e) {
   const { data } = e
   if (!data || typeof data.type !== 'string') return
+
+  // embed 请求业务配置 → 回传（必须在编辑器挂载前送达，否则 embed 会用默认配置）
+  if (data.type === 'request-config') {
+    sendConfig()
+    return
+  }
 
   // 编辑器就绪通知
   if (data.type === 'ready') {
@@ -384,6 +435,12 @@ function postToIframe(msg) {
   })()
   iframe.contentWindow.postMessage(msg, engineOrigin)
   return true
+}
+
+// 下发业务配置给 embed（模板/用户目录/书签显示/分享/CDN，由业务系统控制）
+// embed 挂载时会 postMessage({ type:'request-config' })，收到后调本函数回传。
+function sendConfig() {
+  postToIframe({ type: 'config', payload: editorConfig })
 }
 
 function pmGetContent() {
