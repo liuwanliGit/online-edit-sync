@@ -4,6 +4,7 @@
     <button
       class="umo-cmt-bubble-btn"
       title="添加评论"
+      @mousedown.prevent="onMousedown"
       @click="onClick"
     >
       评论
@@ -25,6 +26,13 @@ const emit = defineEmits(['add'])
 const hasTextSelection = ref(false)
 let editor = null
 
+// 缓存点击瞬间的选区：mousedown 时浏览器可能折叠 DOM 选区，
+// onClick 时 editor.state.selection 可能已经 empty。
+// 在 mousedown（preventDefault 后）把 { from, to, text } 存下来，
+// click 时直接用缓存值，不依赖实时 selection。
+// from/to 仅用于 App.vue 定位 apply mark 的范围，不持久化到后端。
+let cachedSelection = null
+
 function refresh() {
   if (!editor?.state) {
     hasTextSelection.value = false
@@ -37,12 +45,33 @@ function onSelectionUpdate() {
   refresh()
 }
 
-function onClick() {
+function onMousedown() {
   if (!editor?.state) return
   const { from, to, empty } = editor.state.selection
-  if (empty) return
+  if (empty) {
+    cachedSelection = null
+    return
+  }
   const selectedText = editor.state.doc.textBetween(from, to, '\n').slice(0, 2000)
-  emit('add', { from, to, selectedText })
+  cachedSelection = { from, to, selectedText }
+}
+
+function onClick() {
+  // 优先用 mousedown 缓存的选区；兜底取实时选区
+  const sel = cachedSelection || (() => {
+    if (!editor?.state) return null
+    const { from, to, empty } = editor.state.selection
+    if (empty) return null
+    const selectedText = editor.state.doc.textBetween(from, to, '\n').slice(0, 2000)
+    return { from, to, selectedText }
+  })()
+  cachedSelection = null
+  if (!sel) return
+  // 客户端生成 commentId（用作 comment mark 的 data-comment-id + 后端评论主键）
+  const commentId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : `cmt-${Date.now()}-${Math.floor(Math.random() * 1e6)}`
+  emit('add', { commentId, ...sel })
 }
 
 function attach(ed) {
@@ -105,7 +134,7 @@ onBeforeUnmount(detach)
   border-radius: var(--umo-radius, 3px);
   white-space: nowrap;
 }
-.umo-cmt-bubble-btn:hover {
+.umo-bubble-menu-btn:hover {
   background: var(--umo-bg-color-hover, #f2f2f2);
   color: var(--umo-primary-color, #4d8ee0);
 }

@@ -1,14 +1,18 @@
 /**
- * 评论状态管理（方案 B：REST + SSE + 本地范围迁移）
+ * 评论状态管理（方案 B：REST + SSE + Tiptap Mark 锚定）
  * -----------------------------------------------------------
  * - comments/activeCommentId 状态
  * - CRUD 走业务后端 REST（commentApiBase 由父页面 postMessage 下发）
  * - 实时同步走 SSE（EventSource）
- * - 范围迁移：editor.transaction(docChanged) 时用 mapping.map 迁移 {from,to}，
- *   防抖 500ms PATCH 回写后端；塌缩 → status='stale'
+ * - 评论位置由 Tiptap comment mark 锚定（data-comment-id = 评论 id），
+ *   不再使用 {from, to} 位置 + 范围迁移。文字增删时 mark 自动跟随，
+ *   协同编辑通过 Yjs 自动同步 mark，刷新后随 Yjs 文档恢复。
  *
  * author 由 getAuthor() 提供（embed 取 collabUser：name/color/role）。
  * viewer 也可评论（后端不限角色）。
+ *
+ * 挂载方式：由 index.js 调用 createCommentStore(db) 得到 { handle }，
+ * 在路由里 `if (await commentStore.handle(req, res, url)) return`。
  */
 import { ref } from 'vue'
 
@@ -16,8 +20,6 @@ export function useComments({ docId, getAuthor, getCommentApiBase }) {
   const comments = ref([])
   const activeCommentId = ref(null)
   let sse = null
-  const dirty = new Set()
-  let flushTimer = null
 
   function apiUrl(p) {
     const base = (getCommentApiBase() || '').replace(/\/+$/, '')
@@ -68,12 +70,13 @@ export function useComments({ docId, getAuthor, getCommentApiBase }) {
   }
 
   // ============ CRUD ============
-  async function addComment({ from, to, selectedText, content }) {
+  async function addComment({ id, selectedText, content }) {
     const author = getAuthor()
     const res = await fetch(apiUrl(`/documents/${encodeURIComponent(docId)}/comments`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to, selectedText, content, author }),
+      // id 由客户端生成（用于 mark commentId），后端直接用作主键
+      body: JSON.stringify({ id, selectedText, content, author }),
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(data.error || '添加评论失败')
@@ -125,79 +128,11 @@ export function useComments({ docId, getAuthor, getCommentApiBase }) {
     activeCommentId.value = null
   }
 
-  // ============ 范围迁移（最硬的骨头） ============
-  // editor.transaction(docChanged) 时调用：用 ProseMirror mapping.map 迁移每条评论范围
-  function migrateRanges(mapping) {
-    let changed = false
-    const next = comments.value.map((c) => {
-      if (c.status === 'stale') return c
-      let nf = mapping.map(c.from, 1)
-      let nt = mapping.map(c.to, -1)
-      if (nf < 0) nf = 0
-      if (nt < 0) nt = 0
-      if (nf >= nt) {
-        // 范围塌缩（文字被删等）→ 失效
-        changed = true
-        dirty.add(c.id)
-        return { ...c, from: nf, to: nf, status: 'stale' }
-      }
-      if (nf !== c.from || nt !== c.to) {
-        changed = true
-        dirty.add(c.id)
-        return { ...c, from: nf, to: nt }
-      }
-      return c
-    })
-    if (changed) {
-      comments.value = next
-      scheduleFlush()
-    }
-  }
-
-  // 防抖回写迁移后的范围/状态（避免每次按键都打后端）
-  function scheduleFlush() {
-    if (flushTimer) return
-    flushTimer = setTimeout(() => {
-      flushTimer = null
-      const ids = [...dirty]
-      dirty.clear()
-      for (const id of ids) {
-        const c = comments.value.find((x) => x.id === id)
-        if (!c) continue
-        patchSilent(id, { from: c.from, to: c.to, status: c.status })
-      }
-    }, 500)
-  }
-
-  // 静默回写范围：不抛错、不刷整条评论（仅校正 from/to/status，避免与本地迁移打架）
-  async function patchSilent(id, patch) {
-    try {
-      const res = await fetch(apiUrl(`/comments/${encodeURIComponent(id)}`), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patch),
-      })
-      const data = await res.json().catch(() => null)
-      if (res.ok && data) {
-        comments.value = comments.value.map((c) =>
-          c.id === id ? { ...c, from: data.from, to: data.to, status: data.status } : c,
-        )
-      }
-    } catch {
-      // 回写失败不致命，下次迁移再写
-    }
-  }
-
   function dispose() {
     if (sse) {
       sse.close()
       sse = null
     }
-    if (flushTimer) {
-      clearTimeout(flushTimer)
-      flushTimer = null
-    }
-    dirty.clear()
   }
 
   return {
@@ -212,7 +147,6 @@ export function useComments({ docId, getAuthor, getCommentApiBase }) {
     resolveComment,
     setActive,
     clearActive,
-    migrateRanges,
     dispose,
   }
 }

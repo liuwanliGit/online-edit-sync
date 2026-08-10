@@ -29,7 +29,6 @@
         tabindex="0"
         :class="{
           active: activeCommentId === c.id,
-          stale: c.status === 'stale',
           resolved: c.resolved,
         }"
         @click="onClick(c.id)"
@@ -43,8 +42,7 @@
           >
           <span class="umo-cmt-name">{{ c.author?.name || '匿名' }}</span>
           <span class="umo-cmt-time">{{ fmt(c.createdAt) }}</span>
-          <span v-if="c.status === 'stale'" class="umo-cmt-badge stale">原文已删除</span>
-          <span v-else-if="c.resolved" class="umo-cmt-badge resolved">已解决</span>
+          <span v-if="c.resolved" class="umo-cmt-badge resolved">已解决</span>
         </div>
 
         <div v-if="c.selectedText" class="umo-cmt-quote" :title="c.selectedText">
@@ -200,9 +198,6 @@ function fmt(ts) {
   border-color: var(--umo-primary-color, #4d8ee0);
   box-shadow: 0 0 0 2px rgba(77, 142, 224, 0.2);
 }
-.umo-cmt-card.stale {
-  opacity: 0.55;
-}
 .umo-cmt-card.resolved {
   background: var(--umo-bg-color-page, #fafafa);
 }
@@ -236,10 +231,6 @@ function fmt(ts) {
   padding: 1px 6px;
   border-radius: 8px;
   margin-left: auto;
-}
-.umo-cmt-badge.stale {
-  background: #fdecec;
-  color: #e5403a;
 }
 .umo-cmt-badge.resolved {
   background: #e8f7ee;

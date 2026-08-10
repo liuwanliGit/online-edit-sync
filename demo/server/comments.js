@@ -53,12 +53,14 @@ function readJsonBody(req) {
 
 export function createCommentStore(db) {
   // ============ 表 ============
+  // from_pos/to_pos/status 保留兼容旧数据库（旧评论有这些列），但新方案不再使用——
+  // 评论位置由 Tiptap comment mark（data-comment-id）锚定，位置随 Yjs 自动同步。
   db.exec(`
     CREATE TABLE IF NOT EXISTS comments (
       id            TEXT PRIMARY KEY,
       doc_id        TEXT NOT NULL,
-      from_pos      INTEGER NOT NULL,
-      to_pos        INTEGER NOT NULL,
+      from_pos      INTEGER NOT NULL DEFAULT 0,
+      to_pos        INTEGER NOT NULL DEFAULT 0,
       selected_text TEXT,
       author_json   TEXT,
       content       TEXT,
@@ -72,13 +74,16 @@ export function createCommentStore(db) {
 
   const listStmt = db.prepare('SELECT * FROM comments WHERE doc_id = ? ORDER BY created_at ASC')
   const getStmt = db.prepare('SELECT * FROM comments WHERE id = ?')
+  // id 由客户端生成（comment mark 的 commentId），后端直接用作主键
+  // from_pos/to_pos/status 显式写 0/'active'：旧数据库的列可能是 NOT NULL 无 DEFAULT，
+  // 省略会触发 NOT NULL constraint failed。新方案不用这些列，但必须给值兼容旧 schema。
   const insertStmt = db.prepare(`
     INSERT INTO comments (id, doc_id, from_pos, to_pos, selected_text, author_json, content, created_at, resolved, replies_json, status)
-    VALUES (@id, @docId, @from, @to, @selectedText, @authorJson, @content, @createdAt, 0, '[]', 'active')
+    VALUES (@id, @docId, 0, 0, @selectedText, @authorJson, @content, @createdAt, 0, '[]', 'active')
   `)
   const patchStmt = db.prepare(`
     UPDATE comments
-    SET content = @content, resolved = @resolved, from_pos = @from, to_pos = @to, status = @status
+    SET content = @content, resolved = @resolved
     WHERE id = @id
   `)
   const replyStmt = db.prepare('UPDATE comments SET replies_json = @repliesJson WHERE id = @id')
@@ -116,15 +121,12 @@ export function createCommentStore(db) {
     return {
       id: row.id,
       docId: row.doc_id,
-      from: row.from_pos,
-      to: row.to_pos,
       selectedText: row.selected_text || '',
       author: JSON.parse(row.author_json || '{}'),
       content: row.content,
       createdAt: row.created_at,
       resolved: !!row.resolved,
       replies: JSON.parse(row.replies_json || '[]'),
-      status: row.status || 'active',
     }
   }
 
@@ -173,16 +175,13 @@ export function createCommentStore(db) {
           sendJson(res, 400, { error: '评论内容不能为空' })
           return true
         }
-        const from = Number.isFinite(body.from) ? Number(body.from) : 0
-        const to = Number.isFinite(body.to) ? Number(body.to) : from
-        const id = uuidv4()
+        // id 由客户端生成（与 comment mark 的 commentId 一致），兜底用 uuid
+        const id = (body.id || '').toString().trim() || uuidv4()
         const now = Date.now()
         const author = normAuthor(body.author)
         insertStmt.run({
           id,
           docId,
-          from,
-          to,
           selectedText: (body.selectedText || '').toString().slice(0, 2000),
           authorJson: JSON.stringify(author),
           content: content.slice(0, 8000),
@@ -233,9 +232,6 @@ export function createCommentStore(db) {
           id,
           content: body.content !== undefined ? String(body.content).slice(0, 8000) : row.content,
           resolved: body.resolved !== undefined ? (body.resolved ? 1 : 0) : row.resolved,
-          from: Number.isFinite(body.from) ? Number(body.from) : row.from_pos,
-          to: Number.isFinite(body.to) ? Number(body.to) : row.to_pos,
-          status: body.status !== undefined ? String(body.status) : row.status,
         })
         const comment = rowToComment(getStmt.get(id))
         sseBroadcast(row.doc_id, { type: 'comment:updated', payload: comment })
