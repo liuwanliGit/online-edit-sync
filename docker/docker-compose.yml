@@ -56,9 +56,11 @@ services:
       UMO_ENGINE_URL: http://umo-editor-engine:9999/oes
       # 与引擎的 UMO_API_KEY 保持一致（代理签 JWT 时带）
       UMO_API_KEY: ${UMO_API_KEY:-}
-      # 浏览器访问引擎的地址（写入前端 config.js，iframe 用，带 /oes 前缀）。
-      # 默认 localhost:9999/oes 适合本机部署；远程部署改成 http://<服务器IP>:9999/oes
-      UMO_ENGINE_PUBLIC_URL: ${UMO_ENGINE_PUBLIC_URL:-http://localhost:9999/oes}
+      # 浏览器访问引擎的地址（写入前端 config.js，iframe 用，带 /oes 前缀；前端自动拼 /embed）。
+      # 引擎前端产物挂 /oes/embed/ 前缀（与 demo 的 /oes/ 错开，单域名外层 nginx 最长前缀分流）。
+      # 默认 localhost:9999/oes 适合本机部署；远程部署改成 http://<服务器IP或域名>:9999/oes
+      # （或经外层 nginx 的 http://<域名>/oes）
+      UMO_ENGINE_PUBLIC_URL: ${UMO_ENGINE_PUBLIC_URL:-http://localhost:8080/oes}
     volumes:
       # 文档元数据（SQLite）+ 接收的导出文件
       - umo-demo-data:/app/server/data

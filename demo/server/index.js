@@ -18,7 +18,7 @@
 import Database from 'better-sqlite3'
 import busboy from 'busboy'
 import { createWriteStream, createReadStream, mkdirSync, existsSync, statSync } from 'fs'
-import { dirname, join } from 'path'
+import { dirname, join, extname } from 'path'
 import { fileURLToPath } from 'url'
 import http from 'http'
 import { v4 as uuidv4 } from 'uuid'
@@ -205,7 +205,9 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { error: '未收到文件' })
         return
       }
-      const fileUrl = `${url.origin}/api/files/${encodeURIComponent(saved.filename)}`
+      // 返回相对路径（带应用前缀 /oes）：浏览器基于当前页面地址自动解析，
+      // 域名/端口永远正确；若拼绝对 URL，经多层 nginx 透传后 host/前缀容易丢。
+      const fileUrl = `/oes/api/files/${encodeURIComponent(saved.filename)}`
       console.log(`[receive-doc] 收到文件 ${saved.filename} (${saved.size} bytes)`)
       sendJson(res, 200, { url: fileUrl, filename: saved.filename, size: saved.size })
       return

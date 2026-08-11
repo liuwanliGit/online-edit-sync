@@ -1,2 +1,0 @@
-- [English](https://dev.umodoc.com/en/docs/editor/changelog)
-- [中文](https://dev.umodoc.com/cn/docs/editor/changelog)

@@ -44,7 +44,7 @@ case "$ACTION" in
     echo ""
     echo "✅ 构建完成。"
     echo "   启动：  bash docker/build.sh up"
-    echo "   健康检查：curl http://localhost:9999/api/health"
+    echo "   健康检查：curl http://localhost:9999/oes/api/health"
     ;;
 
   up)
@@ -52,8 +52,8 @@ case "$ACTION" in
     $DC -f "$COMPOSE_FILE" up -d --build
     echo ""
     echo "✅ 已启动。"
-    echo "   健康检查：curl http://localhost:9999/api/health"
-    echo "   iframe 嵌入：http://localhost:9999/embed?doc=<docId>&token=<jwt>"
+    echo "   健康检查：curl http://localhost:9999/oes/api/health"
+    echo "   iframe 嵌入：http://localhost:9999/oes/embed?doc=<docId>&token=<jwt>"
     echo "   查看日志：$DC -f \"$COMPOSE_FILE\" logs -f"
     echo "   停止：    bash docker/build.sh down"
     ;;

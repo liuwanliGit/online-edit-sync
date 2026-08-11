@@ -16,14 +16,14 @@
       <template v-if="commentsEnabled">
         <tooltip :content="t('comment.title')">
           <t-button
-            class="umo-status-bar-button"
+            class="umo-status-bar-button auto-width"
             :class="{ active: showCommentPanel }"
             variant="text"
             size="small"
             @click="toggleCommentPanel"
           >
             <icon name="comment" />
-            <span v-if="commentCount > 0" class="umo-comment-badge">{{
+            <span v-if="commentCount > 0" class="umo-comment-count">{{
               commentCount
             }}</span>
           </t-button>
@@ -718,21 +718,12 @@ watch(
     margin: 0 4px;
     color: var(--umo-text-color);
     position: relative;
-    .umo-comment-badge {
-      position: absolute;
-      top: -2px;
-      right: -4px;
-      min-width: 16px;
-      height: 16px;
-      line-height: 16px;
-      padding: 0 4px;
-      border-radius: 8px;
-      background: var(--umo-primary-color);
-      color: #fff;
-      font-size: 10px;
-      text-align: center;
+    // 评论数（图标旁的内联数字，与"字符数"按钮风格一致）
+    .umo-comment-count {
+      margin-left: 3px;
+      font-size: 12px;
+      color: var(--umo-primary-color);
       font-weight: 600;
-      z-index: 1;
     }
     &:not(.auto-width) {
       width: var(--td-comp-size-xs);

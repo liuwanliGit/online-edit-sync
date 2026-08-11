@@ -116,9 +116,11 @@ RUN npm config set registry https://registry.npmmirror.com \
 WORKDIR /app
 
 # ---------- embed 前端静态资源 ----------
-# 放到 /app/public/oes/ 下：URL /oes/assets/x.js 用 root /app/public 自然映射，
-# 无需 nginx alias/rewrite 处理前缀（alias 与 try_files/rewrite 有已知兼容问题）
-COPY --from=embed-builder /build/embed/dist /app/public/oes
+# 放到 /app/public/oes/embed/ 下：URL /oes/embed/assets/x.js 用 root /app/public 自然映射，
+# 无需 nginx alias/rewrite 处理前缀（alias 与 try_files/rewrite 有已知兼容问题）。
+# 引擎专属前缀 /oes/embed/ 与 demo 的 /oes/ 错开：单域名外层 nginx 按最长前缀匹配分流
+# /oes/embed* → 引擎容器，其余 /oes/* → demo 容器，两套 /assets/ 不再冲突。
+COPY --from=embed-builder /build/embed/dist /app/public/oes/embed
 
 # ---------- 配置文件 ----------
 # nginx.conf 是完整的顶层配置（含 events/http 块），直接覆盖主配置

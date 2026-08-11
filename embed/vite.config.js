@@ -5,10 +5,13 @@ import { defineConfig } from 'vite'
 // /embed 纯编辑器页构建配置（独立于库的 library 模式构建）
 // 引用 @umoteam/editor 时走上层仓库的 dist/（package.json 的 exports 已映射）
 export default defineConfig({
-  // 固定应用前缀 /oes/：构建产物 index.html 用 /oes/assets/...、/oes/favicon.png 绝对路径引用，
-  // 配合引擎容器 nginx 的 location /oes/ 提供静态资源。
+  // 固定应用前缀 /oes/embed/：构建产物 index.html 用 /oes/embed/assets/... 绝对路径引用，
+  // 配合引擎容器 nginx 的 location /oes/embed/ 提供静态资源。
+  // 引擎专属前缀 /oes/embed/ 与 demo 的 /oes/ 错开，单域名外层 nginx 可用最长前缀匹配分流：
+  //   /oes/embed*           → 引擎容器
+  //   其余 /oes/*（页面/API）→ demo 容器
   // 同时修掉之前 base:'./' 在某些 vite/rolldown 版本下产物变 /assets/... 绝对路径的 bug。
-  base: '/oes/',
+  base: '/oes/embed/',
   plugins: [vue()],
   resolve: {
     alias: {

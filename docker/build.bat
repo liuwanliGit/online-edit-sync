@@ -21,8 +21,8 @@ if errorlevel 1 (
 echo.
 echo [OK] Engine started on http://localhost:9999
 echo.
-echo   Health check : http://localhost:9999/api/health
-echo   iframe embed : http://localhost:9999/embed?doc=^<docId^>^&token=^<jwt^>
+echo   Health check : http://localhost:9999/oes/api/health
+echo   iframe embed : http://localhost:9999/oes/embed?doc=^<docId^>^&token=^<jwt^>
 echo.
 echo   (Engine root returns the embed page; a doc/token pair is required to mount the editor.)
 echo.

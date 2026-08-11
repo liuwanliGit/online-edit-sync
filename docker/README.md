@@ -8,11 +8,12 @@
 
 ## 架构
 
-应用统一挂在 **`/oes` 前缀**下（固定烧进镜像，前端 vite base 与容器 nginx location 都用 `/oes`）。
+前缀设计（单域名可共存的关健）：**引擎前端固定挂 `/oes/embed/` 前缀**（vite base 同名，与 demo 前端的 `/oes/` 错开，两套 `/assets/` 互不冲突）；**引擎 API/WS 仍挂 `/oes/*` 前缀**（embed 的 `base-path.js` 从着陆页 URL 推导出 `/oes`）。以下为引擎容器内部路由：
 
 ```
 浏览器 ──:9999──► nginx
-                  ├─ /oes/embed            → embed 前端（纯编辑器页，iframe 着陆页）
+                  ├─ /oes/embed             → embed 前端着陆页（iframe 入口，rewrite 到 index.html）
+                  ├─ /oes/embed/            → embed 前端静态资源（assets 等，vite base=/oes/embed/）
                   ├─ /                     → 根路径跳转到 /oes/embed
                   ├─ /oes/api/token        → 协同服务 HTTP 签 JWT (:4000，需 x-api-key)
                   ├─ /oes/api/health       → 协同服务健康检查 (:4000)
@@ -134,7 +135,7 @@ docker compose -f docker/docker-compose.yml down -v
                    ├─ /oes/          → demo 前端（登录 / 文档列表 / 编辑器页 / 文档页）
                    └─ /oes/api/      → demo 后端（文档元数据 + 代理签 JWT + 接收导出）:4001
        ──:9999──► 引擎容器（umo-editor-engine）
-                   └─ /oes/embed 等  → 编辑器引擎（demo 前端通过 iframe 嵌入）
+                   └─ /oes/embed、/oes/embed/* 等  → 编辑器引擎（demo 前端通过 iframe 嵌入）
 ```
 
 ### 一键启动
@@ -154,10 +155,10 @@ docker compose -f docker/docker-compose.yml up -d --build
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `UMO_ENGINE_URL` | `http://umo-editor-engine:9999` | demo 后端 → 引擎（容器内通信，一般不用改） |
-| `UMO_ENGINE_PUBLIC_URL` | `http://localhost:9999/oes` | **浏览器**访问引擎的地址（写入前端 config.js，iframe 用）。远程部署改成 `http://<服务器IP>:9999/oes` |
+| `UMO_ENGINE_PUBLIC_URL` | `http://localhost:9999/oes` | **浏览器**访问引擎的地址（写入前端 config.js，iframe 用，前端自动拼 `/embed`）。远程部署改成 `http://<服务器IP或域名>:9999/oes` 或外层 nginx 的 `http://<域名>/oes` |
 | `UMO_API_KEY` | 空 | 与引擎一致，demo 后端代理签 JWT 时带 |
 
-> ⚠️ `UMO_ENGINE_PUBLIC_URL` 是**浏览器**加载 iframe 用的地址，必须是用户浏览器能访问到的引擎地址（**带 `/oes` 前缀**）。本机部署用默认 `http://localhost:9999/oes` 即可；部署到服务器上改成 `http://<服务器IP或域名>:9999/oes`。
+> ⚠️ `UMO_ENGINE_PUBLIC_URL` 是**浏览器**加载 iframe 用的地址，必须是用户浏览器能访问到的引擎地址（**带 `/oes` 前缀，**不要**带 `/embed`**，前端会自动拼 `/embed`）。本机部署用默认 `http://localhost:9999/oes` 即可；部署到服务器上改成 `http://<服务器IP或域名>:9999/oes`。引擎静态资源挂 `/oes/embed/` 前缀，与 demo 的 `/oes/` 不冲突。
 
 覆盖方式（在仓库根目录建 `.env`）：
 
@@ -213,23 +214,24 @@ docker compose -f docker/docker-compose.yml up -d umo-editor-demo
 
 ### 设计原则：固定前缀 + 整段透传
 
-应用前缀 **`/oes` 已固定烧进镜像**（vite base + 容器 nginx location + 前端代码都用 `/oes`）。因此外层 nginx 的配置**极大简化**：
+前缀已固定烧进镜像：**引擎前端 `/oes/embed/`**（vite base 同名）、**引擎 API/WS `/oes/*`**、**demo `/oes/`**。因此外层 nginx 的配置**极大简化**：
 
 - **直接端口访问**：`http://host:9998/oes/`、`http://host:9999/oes/embed` 即可，无需任何 nginx。
-- **外层 nginx 反代**：把 `/oes/` **整段透传**到容器即可（`proxy_pass` 不带尾斜杠，不剥前缀），因为容器内部已经认 `/oes` 前缀。
+- **外层 nginx 反代**：把 `/oes/embed*` 透传**引擎**容器、其余 `/oes/` 透传 **demo** 容器（`proxy_pass` 不带尾斜杠，不剥前缀），因为容器内部已经认这些前缀。
 
 相比旧方案（前端相对路径 + 外层 nginx 剥前缀 + 运行时推导），这套方案的优势：
 1. **部署只需改 host:port**——有无外层 nginx 都一样，只改 `UMO_ENGINE_PUBLIC_URL` 一个变量。
 2. **彻底消除"剥前缀"这个最容易出错的环节**——外层 nginx 透传即可。
-3. **history 路由深层刷新不 404**——vite base 是绝对路径 `/oes/`，资源引用稳定。
+3. **history 路由深层刷新不 404**——vite base 是绝对路径（引擎 `/oes/embed/`、demo `/oes/`），资源引用稳定。
+4. **引擎与 demo 的 /assets/ 不再冲突**——前缀错开后，单域名反代可按最长前缀匹配正确分流，不会互相兜底成 text/html。
 
 ### 外层 nginx 配置
 
 参考 [`external-nginx.example.conf`](./external-nginx.example.conf)。核心要点：
 
-- **`proxy_pass http://upstream`（不带尾斜杠）** → 整段路径透传 `/oes/...`，容器内 nginx 的 `location /oes/` 接收，**无需剥前缀**。
+- **`proxy_pass http://upstream`（不带尾斜杠）** → 整段路径透传 `/oes/...`，容器内 nginx 的 location 接收，**无需剥前缀**。
 - **WebSocket 的 `/oes/collab` 必须**单独 location 并显式设置 `Upgrade`/`Connection` 头。
-- **单端口区分 demo 和引擎**：引擎专属路径（`/oes/embed`、`/oes/collab`、`/oes/api/convert`、`/oes/api/token`）单独 location 转给引擎容器；其余 `/oes/` 兜底转给 demo 容器。
+- **单端口区分 demo 和引擎**：引擎专属路径（**`/oes/embed`、`/oes/embed/`（含引擎静态资源）**、`/oes/collab`、`/oes/api/convert`、`/oes/api/token`）单独 location 转给引擎容器；其余 `/oes/` 兜底转给 demo 容器。
 
 ### 部署步骤（外层 nginx 场景）
 
@@ -248,7 +250,9 @@ docker compose -f docker/docker-compose.yml up -d umo-editor-demo
 | 检查项 | 期望 |
 |---|---|
 | 访问 `https://your-domain/oes/` | demo 登录页正常加载（无 404） |
+| F12 Network：`/oes/assets/*.js`（demo 自己的资源） | `Content-Type: application/javascript` |
 | 打开文档，iframe 指向 `/oes/embed?...` | 编辑器正常加载 |
+| F12 Network：`/oes/embed/assets/*.js`（引擎资源） | `Content-Type: application/javascript`（**不再是 text/html**） |
 | F12 Network：`/oes/collab` WS | 101 Switching Protocols，协同编辑正常 |
 | F12 Network：`/oes/api/convert/docx` | 导出 Word 正常 |
 | demo 路由刷新（如 `/oes/documents/123`） | 不 404，history fallback 正常 |
