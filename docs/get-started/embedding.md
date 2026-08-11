@@ -9,13 +9,15 @@
 ```
 ① 业务前端调业务后端拿 token
    ↓
-② 用 doc + token + mode 构造 /embed URL
+② 用 doc + token + mode 构造 /oes/embed URL
    ↓
 ③ 把 URL 赋给 iframe.src
    ↓
-④ iframe 加载完成 → 引擎建立协同连接 → 编辑器就绪
+④ embed 加载 → postMessage 请求业务配置（request-config）→ 父页面回传 config
    ↓
-⑤ 监听 iframe 的 postMessage('ready') 或同源直调 window.__UMO_EDITOR__
+⑤ 建立协同连接 → 编辑器就绪 → postMessage('ready')
+   ↓
+⑥ 与编辑器交互（同源直调 window.__UMO_EDITOR__ 或 postMessage）
 ```
 
 ---
@@ -28,9 +30,9 @@ async function openDocument(docId) {
   // 1. 调业务后端拿 token（见 鉴权对接 一节）
   const { token, role } = await fetch(`/my-doc-token?doc=${docId}`).then(r => r.json())
 
-  // 2. 构造 iframe URL
+  // 2. 构造 iframe URL（注意：引擎地址带 /oes 前缀，自动拼 /embed）
   const mode = role === 'viewer' ? 'view' : 'edit'
-  const editorUrl = `http://editor-host:9999/embed?doc=${docId}&token=${token}&mode=${mode}`
+  const editorUrl = `http://editor-host:9999/oes/embed?doc=${docId}&token=${token}&mode=${mode}`
 
   // 3. 嵌入 iframe
   document.querySelector('#editor-frame').src = editorUrl
@@ -61,6 +63,46 @@ async function openDocument(docId) {
 | `title` | ❌ | — | 文档标题。显示在编辑器内标题位（工具栏左侧、导出文件名），不传则显示「未命名」 |
 
 完整契约见 [iframe URL 参数](../api-reference/url-params.md)。
+
+---
+
+## 业务配置下发（request-config / config 协议）
+
+embed 挂载时会主动向父页面发送 `{ type: 'request-config' }`，**父页面应回传** `{ type: 'config', payload }`，下发业务系统可控制的编辑器配置。若 3 秒内父页面未响应，embed 使用默认配置继续加载（不阻塞）。
+
+```js
+// 父页面监听
+window.addEventListener('message', (e) => {
+  if (e.data.type === 'request-config') {
+    iframe.contentWindow.postMessage({
+      type: 'config',
+      payload: {
+        // 模板：编辑器「模板」工具插入的内容
+        templates: [
+          { title: '工作任务', description: '工作任务模板', content: '<h1>工作任务</h1>...' },
+        ],
+        // @提及用户目录（输入 @ 触发本地过滤）
+        users: [{ id: 'alice', label: 'Alice', color: '#e06c75' }],
+        // 页面配置（可覆盖 showBookmark 等）
+        page: { showBookmark: true },
+        // 分享地址 / CDN 地址（可选，覆盖编辑器默认值）
+        shareUrl: 'https://share.example.com/s/xxx',
+        cdnUrl: 'https://cdn.example.com',
+      },
+    }, '*')
+  }
+})
+```
+
+| payload 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `templates` | `Array` | 模板列表（`{ title, description, content }`），编辑器「模板」工具使用 |
+| `users` | `Array` | @提及用户目录（`{ id, label, bio?, color? }`），embed 本地过滤 |
+| `page.showBookmark` | `boolean` | 是否显示书签（默认 `true`） |
+| `shareUrl` | `string` | 分享地址（可选） |
+| `cdnUrl` | `string` | CDN 地址（可选） |
+
+> 用 postMessage 下发配置而不是 URL 参数，是为了不受 URL 长度限制、且配置随业务运行态变化。
 
 ---
 
@@ -108,25 +150,32 @@ iframe.onload = () => {
 
 ## 运行时指定引擎地址
 
-业务前端可通过全局变量在运行时指定引擎地址，**无需重新构建**：
+业务前端可通过全局变量在运行时指定引擎地址，**无需重新构建**。读取优先级（高 → 低）：
+
+1. `window.__UMO_CONFIG__.engineUrl` —— 来自部署时生成的 `config.js`（Docker 部署由 entrypoint 注入，推荐）
+2. `window.__UMO_ENGINE_URL__` —— 全局变量覆盖（兼容旧用法）
+3. 兜底 `http://localhost:9999/oes`（本地开发）
 
 ```js
-// 在应用启动前设置（必须在加载使用引擎地址的代码之前）
-window.__UMO_ENGINE_URL__ = 'http://editor-host:9999'
+// 方式一：config.js（部署后可改，无需重新构建前端）
+window.__UMO_CONFIG__ = { engineUrl: 'http://editor-host:9999/oes' }
 
-// 反代同源时（业务系统 nginx 把引擎反代到 /editor/ 子路径）
-window.__UMO_ENGINE_URL__ = '/editor'
+// 方式二：全局变量
+window.__UMO_ENGINE_URL__ = 'http://editor-host:9999/oes'
+
+// 反代同源时（业务系统 nginx 把引擎反代到 /oes 子路径，iframe 与父页面同域）
+window.__UMO_ENGINE_URL__ = '/oes'
 ```
 
-不设置时兜底 `http://localhost:9999`（本地开发用）。
+> ⚠️ 引擎地址必须带 **`/oes` 前缀**（业务系统部署目录），且**不要**带 `/embed`（前端会自动拼 `/embed`）。
 
-> 仓库 `demo/src/utils/engine-config.js` 提供了 `getEngineUrl()` 和 `getEmbedUrl(doc, token, mode, lang)` 两个辅助函数，可直接复用：
+> 仓库 `demo/src/utils/engine-config.js` 提供了 `getEngineUrl()` 和 `getEmbedUrl(doc, token, mode, lang, title)` 两个辅助函数，可直接复用：
 
 ```js
 import { getEmbedUrl } from '@/utils/engine-config'
 
-const url = getEmbedUrl(docId, token, 'edit', 'zh-CN')
-// → "http://editor-host:9999/embed?doc=...&token=...&mode=edit&lang=zh-CN"
+const url = getEmbedUrl(docId, token, 'edit', 'zh-CN', '我的文档')
+// → "http://editor-host:9999/oes/embed?doc=...&token=...&mode=edit&lang=zh-CN&title=..."
 ```
 
 ---
@@ -140,7 +189,8 @@ async function ensureFreshToken(docId) {
   const { token, exp } = await fetch(`/my-doc-token?doc=${docId}`).then(r => r.json())
   const now = Math.floor(Date.now() / 1000)
   if (exp - now < 3600) {
-    // 剩余不足 1 小时，已在后端重新签发
+    // 剩余不足 1 小时：重新签发
+    return (await fetch(`/my-doc-token?doc=${docId}`).then(r => r.json())).token
   }
   return token
 }

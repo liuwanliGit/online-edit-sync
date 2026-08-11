@@ -8,7 +8,7 @@
 
 ```
 你的业务系统技术栈是 Vue3，且愿意维护协同运行时（yjs/@hocuspocus）？
-├─ 是 → 考虑「组件库集成」模式（npm 包，见 COLLAB_HANDOFF.md）
+├─ 是 → 考虑「组件库集成」模式（npm 包 @umoteam/editor + 自行编排 Yjs provider）
 └─ 否 → 用本指南的「引擎 iframe 集成」模式
         │
         能配 nginx 反代吗？
@@ -16,10 +16,6 @@
         │        → 见 强交互集成（同源）
         └─ 不能 → 跨域 postMessage（通用）
                  → 见 最小可用集成（跨域）
-                 │
-                 需要后端读文档（列表/检索）？
-                 ├─ 需要 → 启用 read-server（二阶段）
-                 └─ 不需要 → 仅前端交互即可
 ```
 
 ---
@@ -50,7 +46,7 @@
 
 JWT 默认 24h 过期。建议：
 - **主动刷新**：业务前端在 iframe 加载前检查 token 剩余有效期，临近过期（如 < 1h）重新调业务后端换 token
-- **被动刷新**：协同连接断开时（`onAuthenticationFailed`），重新走「换 token → 重设 iframe src」流程
+- **被动刷新**：协同鉴权失败时 iframe 内显示错误态，业务前端检测到编辑器不可用后，重新走「换 token → 重设 iframe src」流程
 
 详见 [鉴权对接 - token 过期处理](./authentication.md#token-过期处理)。
 
@@ -58,14 +54,12 @@ JWT 默认 24h 过期。建议：
 
 ### Q4: 能不能不用 iframe，直接把编辑器组件嵌入我的 Vue 项目？
 
-**可以**，但那是「组件库集成」模式（引 npm 包 + 自己编排 Yjs provider），不是本指南的「私有化引擎」模式。
+**可以**，但那是「组件库集成」模式（引 npm 包 `@umoteam/editor` + 自己编排 Yjs provider），不是本指南的「私有化引擎」模式。
 
 | 模式 | 集成成本 | 适用 |
 | --- | --- | --- |
 | 引擎 iframe（本指南） | 低（只需 iframe + 4 步） | 跨技术栈、低耦合 |
 | 组件库集成（npm 包） | 高（要装 yjs/@hocuspocus + 版本对齐） | 技术栈一致、愿维护协同运行时 |
-
-组件库集成详见 `COLLAB_HANDOFF.md`。
 
 ---
 
@@ -76,12 +70,12 @@ JWT 默认 24h 过期。建议：
 解决：按 [nginx 同域反代配置](../api-reference/nginx-reverse-proxy.md) 设 `proxy_read_timeout 86400s`。
 
 ```nginx
-location /editor/ {
-    proxy_pass http://editor-host:9999/;
+location /oes/collab {
+    proxy_pass http://umo_engine;          # 不带尾斜杠，整段透传
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection $connection_upgrade;
-    proxy_read_timeout 86400s;   # ← 关键
+    proxy_read_timeout 86400s;             # ← 关键
 }
 ```
 
@@ -89,9 +83,9 @@ location /editor/ {
 
 ### Q6: 如何做高保真导出？
 
-**必须走前端路径**（用户打开文档时）。编辑器已渲染好 DOM，`getImage()` 截图或 `getVanillaHTML() → docx` 都是所见即所得。
+**必须走前端路径**（用户打开文档时）。编辑器已渲染好 DOM，`getImage()` 截图或 `getVanillaHTML() → docx` 都是所见即所得。引擎工具栏自带「导出 Word」（浏览器直接下载），也可走 postMessage `export`（方案 B3）把文件回传给业务后端。
 
-后端无头导出（read-server）只适合批量/离线场景，保真度低（图表、公式、视频会降级）。
+> 后端无头导出（read-server，二阶段规划）只适合批量/离线场景，无 DOM 环境渲染复杂节点会降级，不用于高保真导出。
 
 详见 [导出与文件回传](../api-reference/export.md)。
 
@@ -99,9 +93,9 @@ location /editor/ {
 
 ### Q7: 引擎镜像里为什么没有文档列表/登录页？
 
-因为文档列表、登录、权限管理是**业务系统自己的职责**，引擎只管「编辑这一篇文档时的实时协同」。引擎默认入口是 `/embed`（纯编辑器页）。
+因为文档列表、登录、权限管理是**业务系统自己的职责**，引擎只管「编辑这一篇文档时的实时协同」。引擎默认入口是 `/oes/embed`（纯编辑器页）。
 
-完整示例在仓库的 `demo/` 目录，是一个**瘦客户端源码**（不打包镜像）：演示业务系统如何用 iframe 接引擎，含登录/列表/编辑器页 + 四类交互演示。详见 [瘦客户端示例项目](../samples/demo-project.md)。
+完整示例在仓库的 `demo/` 目录，是一个**瘦客户端源码**（也可用 `docker compose` 直接跑 `umo-editor-demo` 容器）：演示业务系统如何用 iframe 接引擎，含登录/列表/编辑器页 + 四类交互演示。详见 [瘦客户端示例项目](../samples/demo-project.md)。
 
 ---
 
@@ -113,27 +107,41 @@ location /editor/ {
 
 ---
 
-### Q9: viewer 角色的只读是前端控制还是服务端强制？
+### Q9: 评论功能需要自己搭后端吗？只读用户能评论吗？
+
+**不需要自己搭后端。** 评论功能已内置在引擎中（默认开启）：
+
+- 评论数据存引擎自己的 `comments.db`（SQLite），随数据卷持久化
+- 评论位置由 Tiptap comment mark 锚定，随 Yjs 协同自动同步；列表更新走 SSE
+- **viewer 只读用户也可以发表评论**（评论权限不随文档编辑权限走）
+- 不想要评论：`comments: { enabled: false }` 或 `disableExtensions: ['comment']`
+- 业务系统要读取评论数据：`GET /oes/api/documents/:docId/comments`（无鉴权，同源信任）
+
+详见 [支持的功能 - 评论](../get-started/features.md#评论内置) 与 [服务端接口 - 评论 API](../api-reference/server-api.md#评论-api)。
+
+---
+
+### Q10: viewer 角色的只读是前端控制还是服务端强制？
 
 **服务端强制。** JWT role claim 为 `viewer` 时，引擎 `onAuthenticate` hook 会把连接设为只读（`connection.readOnly = true`），Hocuspocus 服务端会**拒绝该连接的所有 update**。即使前端绕过 UI 限制，写入也不会生效。
 
 ---
 
-### Q10: 多人同时编辑会冲突吗？
+### Q11: 多人同时编辑会冲突吗？
 
 **不会。** 基于 Yjs CRDT 算法，多用户同时编辑同一篇文档会自动无冲突合并。网络断开重连后，离线期间的编辑也会自动合并。
 
 ---
 
-### Q11: 如何限制只有特定用户才能编辑某篇文档？
+### Q12: 如何限制只有特定用户才能编辑某篇文档？
 
-在**业务后端**的权限逻辑里决定。业务后端调引擎 `/api/token` 时传 `role` 参数：
+在**业务后端**的权限逻辑里决定。业务后端调引擎 `/oes/api/token` 时传 `role` 参数：
 
 ```js
 // 业务后端
 const role = await checkUserPermission(userId, docId)  // 'editor' 或 'viewer'
 const r = await fetch(
-  `http://editor-host:9999/api/token?name=${userName}&doc=${docId}&role=${role}`,
+  `http://editor-host:9999/oes/api/token?name=${userName}&doc=${docId}&role=${role}`,
   { headers: { 'x-api-key': UMO_API_KEY } }
 )
 ```
@@ -142,10 +150,10 @@ const r = await fetch(
 
 ---
 
-### Q12: 能否同时部署多个引擎实例做负载均衡？
+### Q13: 能否同时部署多个引擎实例做负载均衡？
 
-一阶段是单实例（内存 + SQLite）。后续阶段支持：
-- **阶段二**：把 `onStoreDocument/onLoadDocument` 换成真实数据库（MySQL/Postgres）
-- **阶段三**：加 `@hocuspocus/extension-redis` 做多实例广播
+当前是单实例（SQLite + 内存态）。扩展方向：
+- **阶段二（已部分实现）**：`onStoreDocument/onLoadDocument` 已接 SQLite；换 MySQL/Postgres 只需替换 `collab-server/storage.js` 实现
+- **阶段三（规划）**：加 `@hocuspocus/extension-redis` 做多实例广播
 
 多实例需要共享文档存储 + Redis pub/sub 广播，否则同一篇文档的协作者连到不同实例会看不到彼此。

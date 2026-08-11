@@ -30,9 +30,9 @@ app.get('/my-doc-token', authMiddleware, async (req, res) => {
   // 校验用户权限，决定角色
   const role = await checkUserPermission(userId, docId)  // 'editor' 或 'viewer'
 
-  // 调引擎签 JWT
+  // 调引擎签 JWT（注意路径带 /oes 前缀）
   const r = await fetch(
-    `http://editor-host:9999/api/token?name=${encodeURIComponent(userName)}&doc=${encodeURIComponent(docId)}&role=${role}`,
+    `http://editor-host:9999/oes/api/token?name=${encodeURIComponent(userName)}&doc=${encodeURIComponent(docId)}&role=${role}`,
     { headers: { 'x-api-key': process.env.UMO_API_KEY } }
   )
   const { token } = await r.json()
@@ -69,7 +69,7 @@ app.post('/api/receive-doc', upload.single('file'), async (req, res) => {
   <button onclick="exportDocx()">导出 Word</button>
 
   <script>
-  const ENGINE_URL = 'http://editor-host:9999'
+  const ENGINE_URL = 'http://editor-host:9999/oes'   // 引擎地址（带 /oes 前缀）
   const iframe = document.getElementById('editor')
   let editorReady = false
 
@@ -78,8 +78,21 @@ app.post('/api/receive-doc', upload.single('file'), async (req, res) => {
     // 调业务后端拿 token
     const { token, role } = await fetch(`/my-doc-token?doc=${docId}`).then(r => r.json())
     const mode = role === 'viewer' ? 'view' : 'edit'
+    // getEmbedUrl 等价写法：ENGINE_URL + '/embed'（引擎着陆页固定为 /oes/embed）
     iframe.src = `${ENGINE_URL}/embed?doc=${docId}&token=${token}&mode=${mode}`
   }
+
+  // ============ 1.5 响应业务配置请求（可选但推荐） ============
+  // embed 挂载时发 { type:'request-config' }，父页面回传 { type:'config', payload }，
+  // 用于下发模板 / @提及用户 / 书签显示 / 分享地址等；3s 内不响应则用默认配置。
+  window.addEventListener('message', (e) => {
+    if (e.data.type === 'request-config') {
+      iframe.contentWindow.postMessage({
+        type: 'config',
+        payload: { users: [], templates: [], page: { showBookmark: true } },
+      }, '*')
+    }
+  })
 
   // ============ 2. 监听编辑器就绪 ============
   window.addEventListener('message', (e) => {
@@ -167,13 +180,15 @@ app.post('/api/receive-doc', upload.single('file'), async (req, res) => {
 
 | 能力 | 方式 |
 | --- | --- |
-| 打开文档 + 实时协同 | iframe `/embed` |
+| 打开文档 + 实时协同 | iframe `/oes/embed` |
+| 业务配置下发 | `request-config` / `config` 消息 |
 | 编辑器就绪感知 | `ready` 消息 |
 | 取内容（HTML/JSON/Text） | postMessage `getHTML` 等 |
 | 替换/插入内容 | postMessage `setContent` / `insertContent` |
 | 切换只读 | postMessage `setReadOnly` |
 | 导出 Word | postMessage `export` + 业务后端 `/api/receive-doc` |
 | 协作者列表 | `awareness` 消息 |
+| 评论（引擎内置） | 引擎左侧面板 / 状态栏，无需业务后端 |
 
 ---
 

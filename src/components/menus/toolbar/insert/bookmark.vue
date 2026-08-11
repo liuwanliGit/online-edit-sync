@@ -73,8 +73,8 @@ const page = inject('page')
 let dialogVisible = $ref(false)
 // 书签名称
 let bookmarkText = $ref('')
-// 书签数据
-let bookmarkData = []
+// 书签数据（必须用 $ref 保持响应式，否则 getAllBookmarks 赋值后表格不会刷新）
+let bookmarkData = $ref([])
 // 书签表格显示列
 const bookmarkColumns = [
   {
@@ -128,8 +128,13 @@ const insertBookmark = () => {
   }
 }
 const onActiveChange = (highlightRowKeys, ctx) => {
-  // 重置文档
+  // 回填名称到输入框
   bookmarkText = ctx.currentRowData?.bookmarkRowName
+  // 点行即定位：直接跳转到该书签并关闭弹窗（无需再点「确定」）
+  const name = ctx.currentRowData?.bookmarkRowName
+  if (name && editor.value?.commands.focusBookmark(name)) {
+    dialogVisible = false
+  }
 }
 // 这个方法本来也想封装到addCommands 中，但经过多次验证，每次都会有一个额外的事务异常
 const rowDelete = (row) => {

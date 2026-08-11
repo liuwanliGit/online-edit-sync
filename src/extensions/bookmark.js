@@ -63,16 +63,35 @@ export default Mark.create({
               `bookmark[bookmarkName="${bookmarkName}"]`,
             )
             if (element) {
+              // 书签可能被「不显示书签」隐藏（display:none，无布局框，scrollIntoView 会失效）。
+              // 定位时临时显示目标书签 → 滚动 → 恢复隐藏，保证隐藏状态下也能正常跳转。
+              const hidden =
+                !element.offsetWidth &&
+                !element.offsetHeight &&
+                !element.getClientRects().length
+              let restore = null
+              if (hidden) {
+                restore = element.style.display
+                element.style.display = 'inline'
+              }
+              // 隐藏时用同步滚动（auto），避免 smooth 异步动画被恢复隐藏打断
               element.scrollIntoView({
-                behavior: 'smooth',
+                behavior: hidden ? 'auto' : 'smooth',
                 block: 'center',
                 inline: 'nearest',
               })
-              const pos = editor.view.posAtDOM(element, 0)
-              if (tr) {
-                tr.setSelection(new TextSelection(tr.doc.resolve(pos)))
-                editor.view.dispatch(tr)
-                editor.view.focus()
+              if (restore !== null) {
+                element.style.display = restore
+              }
+              try {
+                const pos = editor.view.posAtDOM(element, 0)
+                if (tr && pos !== null && pos >= 0) {
+                  tr.setSelection(new TextSelection(tr.doc.resolve(pos)))
+                  editor.view.dispatch(tr)
+                  editor.view.focus()
+                }
+              } catch (e) {
+                // 位置解析失败时静默跳过（滚动已尽量执行），不影响编辑器
               }
             }
             return true

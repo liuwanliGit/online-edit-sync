@@ -2,9 +2,9 @@
 
 演示**业务系统如何通过 iframe 嵌入 Umo Editor 引擎**，实现协同编辑。
 
-这是一个**瘦客户端**：不包含编辑器组件、不包含协同运行时（无 `@tiptap/*` / `yjs` / `@hocuspocus/provider` 等依赖），编辑器完全由引擎镜像的 `/embed` 页面提供，本示例只演示接入方真实要做的事。
+这是一个**瘦客户端**：不包含编辑器组件、不包含协同运行时（无 `@tiptap/*` / `yjs` / `@hocuspocus/provider` 等依赖），编辑器完全由引擎镜像的 `/oes/embed` 页面提供，本示例只演示接入方真实要做的事。
 
-> 完整接入文档见仓库根目录 `EMBED_INTEGRATION_GUIDE.md`。
+> 完整接入文档见仓库 [`docs/`](../docs/README.md)，本目录的说明见 [瘦客户端示例项目](../docs/samples/demo-project.md)。
 
 ## 架构
 
@@ -21,17 +21,18 @@
 │  │          │  └────┬─────┘   │   receive-doc │        │
 │  └──────────┘       │         └──────┬───────┘        │
 └─────────────────────┼────────────────┼────────────────┘
-                      │ iframe src      │ GET /api/token
+                      │ iframe src      │ GET /oes/api/token
                       ▼                ▼
 ┌──────────────────────────────────────────────────────┐
-│ Umo Editor 引擎镜像 (9999)  ← 先启动这个              │
-│  nginx → /embed 纯编辑器页 + /collab WS + /api/*     │
+│ Umo Editor 引擎容器 (9999)  ← 先启动这个              │
+│  nginx → /oes/embed 纯编辑器页 + /oes/collab WS       │
+│          + /oes/api/* + 评论 API                      │
 └──────────────────────────────────────────────────────┘
 ```
 
-- **示例前端**（`demo/src/`）：登录、文档列表、编辑器页（iframe 嵌入引擎 + 四类交互演示）
-- **示例后端**（`demo/server/`）：文档元数据 REST + 代理签 JWT + 接收导出文件（演示业务后端职责）
-- **引擎镜像**：私有化部署的编辑器引擎，独立启动，不含 demo
+- **示例前端**（`demo/src/`）：登录、文档列表、编辑器页（iframe 嵌入引擎 + 四类交互演示）、文档查看页
+- **示例后端**（`demo/server/`）：文档元数据 REST + 代理签 JWT + 接收导出文件 + 评论参考实现（演示业务后端职责）
+- **引擎容器**：私有化部署的编辑器引擎，独立启动，不含 demo
 
 ## 前置条件
 
@@ -39,15 +40,15 @@
 
 ```bash
 # 在仓库根目录
-bash docker/build.sh up        # Linux/macOS
+bash docker/build.sh up        # Linux/macOS（构建引擎 + demo 两个镜像）
 # 或 Windows:
 docker\build.bat
 
 # 验证
-curl http://localhost:9999/api/health    # → {"ok":true,...}
+curl http://localhost:9999/oes/api/health    # → {"ok":true,...}
 ```
 
-> 引擎镜像启动后，`/embed` 纯编辑器页即可通过 iframe 嵌入。详见 `docker/README.md`。
+> 引擎镜像启动后，`/oes/embed` 纯编辑器页即可通过 iframe 嵌入。详见 `docker/README.md`。
 
 ### 2. 启动示例后端
 
@@ -57,12 +58,12 @@ npm install
 npm start          # http://localhost:4001
 ```
 
-环境变量（可选）：
+配置（二选一，环境变量优先级更高）：编辑同目录 `config.json`，或用环境变量覆盖：
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `PORT` | `4001` | 示例后端端口 |
-| `UMO_ENGINE_URL` | `http://localhost:9999` | 引擎地址（代理签 JWT 时调） |
+| `UMO_ENGINE_URL` | `http://localhost:9999/oes` | 引擎地址（**带 /oes 前缀**，代理签 JWT 时调） |
 | `UMO_API_KEY` | 空 | 引擎 `/api/token` 的凭据（与引擎启动时一致；引擎 dev 模式可留空） |
 | `BIZ_RECEIVE_KEY` | 空 | 接收导出文件的鉴权 key（前端透传；留空不校验） |
 
@@ -80,30 +81,30 @@ npm run dev          # http://localhost:5173
 
 ## 配置引擎地址
 
-默认指向 `http://localhost:9999`。部署到生产时，在 `index.html` 加载前端前设置全局变量即可，无需重新构建：
+默认指向 `http://localhost:9999/oes`（**带 /oes 前缀**）。部署到生产时，在 `index.html` 加载前端前设置全局变量即可，无需重新构建：
 
 ```html
 <script>
-  // 引擎地址（iframe src、token 代理调）
-  window.__UMO_ENGINE_URL__ = 'http://editor-host:9999'
+  // 引擎地址（iframe src、token 代理调）。优先级：__UMO_CONFIG__.engineUrl > __UMO_ENGINE_URL__
+  window.__UMO_CONFIG__ = { engineUrl: 'http://editor-host:9999/oes' }
   // 示例后端地址（文档元数据 REST）
   window.__UMO_API_URL__ = 'http://localhost:4001'
 </script>
 ```
 
-**反代同源时**（业务系统 nginx 把引擎反代到 `/editor/` 子路径）：
+**反代同源时**（业务系统 nginx 把引擎反代到 `/oes` 子路径）：
 
 ```js
-window.__UMO_ENGINE_URL__ = '/editor'    // iframe 与父页面同域，可走同源直调
+window.__UMO_ENGINE_URL__ = '/oes'    // iframe 与父页面同域，可走同源直调
 ```
 
 ## 四类交互演示
 
-打开任意文档后，右侧面板展示四个核心接入场景（对应 `EMBED_INTEGRATION_GUIDE.md` 第三~五节）：
+打开任意文档后，右侧面板展示四个核心接入场景（对应 `docs/` 中的接入文档）：
 
 ### 1. 鉴权对接（业务后端代理签 JWT）
 
-前端不直接调引擎 `/api/token`（需 API Key，不能暴露给前端），而是调示例后端 `/api/doc-token`，后端持 `UMO_API_KEY` 代签 JWT，前端只拿到短时 JWT 放进 iframe URL。
+前端不直接调引擎 `/oes/api/token`（需 API Key，不能暴露给前端），而是调示例后端 `/api/doc-token`，后端持 `UMO_API_KEY` 代签 JWT，前端只拿到短时 JWT 放进 iframe URL。
 
 ### 2. 同源直调（同步取内容）
 
@@ -113,7 +114,7 @@ window.__UMO_ENGINE_URL__ = '/editor'    // iframe 与父页面同域，可走�
 
 ### 3. 跨域 postMessage
 
-不配反代时用 postMessage（异步请求/响应）。演示 `getContent`（取内容）和 `insertContent`（插入段落）。
+不配反代时用 postMessage（异步请求/响应）。演示 `getContent`（取内容）和 `insertContent`（插入段落）。embed 挂载时还会发 `request-config`，父页面回传业务配置（模板 / @提及用户 / 书签显示）。
 
 ### 4. 导出 Word（方案 B3 回传）
 
@@ -126,11 +127,14 @@ window.__UMO_ENGINE_URL__ = '/editor'    // iframe 与父页面同域，可走�
 ```
 demo/
 ├── package.json          # 依赖极轻：vue + tdesign + vue-router
-├── vite.config.js        # 无 dedupe / optimizeDeps（不含协同运行时）
+├── vite.config.js        # 无 dedupe / optimizeDeps（不含协同运行时），dev 端口 5173
 ├── index.html
+├── docker/               # demo 容器构建（Dockerfile / nginx.conf / supervisord.conf / entrypoint.sh）
 ├── server/               # 示例后端（演示业务后端职责）
 │   ├── package.json      #   deps: better-sqlite3, uuid, busboy
 │   ├── index.js          #   文档元数据 REST + /api/doc-token + /api/receive-doc
+│   ├── comments.js       #   评论后端参考实现（demo 前端用引擎内置评论）
+│   ├── config.json       #   本地配置（port / engineUrl / apiKey / receiveKey）
 │   └── data/             #   SQLite + 回传文件（gitignore）
 └── src/
     ├── main.js           # 注册 router + TDesign（不注册编辑器组件）
@@ -141,29 +145,31 @@ demo/
     │   └── documents.js  # 文档 CRUD（REST → 示例后端）
     ├── utils/
     │   ├── api.js        # 示例后端 REST 客户端 + fetchDocToken
-    │   └── engine-config.js  # 引擎地址解析 + /embed URL 构造
+    │   ├── engine-config.js  # 引擎地址解析 + /oes/embed URL 构造
+    │   └── collab-config.js  # 协同服务地址解析（独立使用引擎时用）
     ├── composables/useToast.js
     ├── styles/global.css
     └── views/
         ├── LoginView.vue        # 登录页（用户名 + 角色）
         ├── DocumentsView.vue    # 文档列表（卡片网格）
-        └── EditorView.vue       # 编辑器页（iframe + 四类交互演示）
+        ├── EditorView.vue       # 编辑器页（iframe + 四类交互演示）
+        └── DocsView.vue         # 文档查看页（只读）
 ```
 
 ## 与引擎的关系
 
-| 维度 | 示例（本目录） | 引擎镜像 |
+| 维度 | 示例（本目录） | 引擎容器 |
 |---|---|---|
-| 编辑器 | iframe 引用引擎 `/embed` | 提供编辑器 + 协同运行时 |
+| 编辑器 | iframe 引用引擎 `/oes/embed` | 提供编辑器 + 协同运行时 |
 | 协同依赖 | 无（零 `@tiptap`/`yjs`/`@hocuspocus`，仅 vue+tdesign+router） | 全部在内 |
-| 打包 | 仅源码，不进 Dockerfile | 单镜像交付 |
+| 打包 | 独立容器（`umo-editor-demo`，:9998）或本地源码运行 | 单镜像交付（`umo-editor-engine`，:9999） |
 | 职责 | 演示业务系统接入 | 提供编辑能力 |
 
 ## 体验多用户协同
 
-1. 启动引擎镜像 + 示例后端 + 示例前端
+1. 启动引擎 + 示例（`docker compose -f docker/docker-compose.yml up -d --build` 或本地源码启动）
 2. 浏览器窗口 A：用户名「张三」、角色「编辑者」→ 新建文档「会议纪要」
 3. 浏览器窗口 B（或无痕窗口）：用户名「李四」、角色「编辑者」→ 列表里能看到「会议纪要」
-4. 两人都打开它 → 输入实时同步，对方光标带颜色和名字
+4. 两人都打开它 → 输入实时同步，对方光标带颜色和名字；选中文字还能互相看到评论
 
 > 协同能力由引擎 collab-server 提供，示例前端只管 iframe 嵌入和交互，不碰 Yjs。

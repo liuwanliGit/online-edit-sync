@@ -1,5 +1,8 @@
 # 评论功能内置于编辑器引擎 — 详细设计方案
 
+> **状态：已实现（2026-08）**。本页为设计文档，记录了目标架构与实施步骤；实施结果与本文的设计存在少量差异，见文末 [实现现状与设计差异](#八实现现状与设计差异)。
+> 使用层面的说明见 [支持的功能 - 评论](./get-started/features.md) 与 [服务端接口 - 评论 API](./api-reference/server-api.md)。
+
 ## 一、目标
 
 将评论功能从 embed 瘦客户端移入编辑器引擎（`@umoteam/editor`），使其成为编辑器的内置功能：
@@ -10,6 +13,8 @@
 - 业务系统可通过 REST API 读取评论数据（只读口子）
 
 ## 二、当前架构 vs 目标架构
+
+> 2026-08 该迁移已完成：embed 瘦客户端的评论代码已删除，评论功能由引擎内置提供。下方「目标架构」即当前实现。
 
 ### 当前架构
 
@@ -617,3 +622,32 @@ location /oes/api/documents/ {
 4. **API 鉴权复用 JWT**：评论 API 通过 `Authorization: Bearer <token>` 鉴权，token 与
    协同连接共用同一个 JWT。服务端验证 token 并校验 `payload.doc === docId` 防越权。
    viewer 和 editor 的 JWT 都有 `doc` claim，都能访问对应文档的评论 API
+
+---
+
+## 八、实现现状与设计差异
+
+> 本页设计在 2026-08 已落地实现。以下为**实现与本文设计不一致**之处，以实际代码为准：
+
+### 8.1 鉴权：设计为 JWT 复用，实现为「无鉴权（同源信任）」
+
+- **设计**（本文 4.2 节）：评论 API 复用协同 JWT，`Authorization: Bearer <token>` 鉴权，校验 `payload.doc === docId` 防越权。
+- **实现**（`collab-server/comment-storage.js`）：评论 API **无鉴权**。理由：collab-server 的 4000 端口在 Docker 中不对外暴露，评论 API 只能经引擎 nginx 同源反代访问，依赖「同源信任」即可。viewer 与 editor 均可读写评论。
+- **影响**：业务系统直接调用评论 REST 时无需带 JWT；若将评论 API 暴露到公网（不推荐），需自行在业务侧加鉴权。
+
+### 8.2 组件路径：`src/components/comment/` → `src/components/container/comment/`
+
+- 评论面板组件实际位于 `src/components/container/comment.vue` 与 `src/components/container/comment/`（与 TOC 同侧布局由 container 层管理）。
+
+### 8.3 前端 API 前缀推导
+
+- `src/utils/base-path.js` 的 `getCommentApiBase()`：优先级为 `options.comments.apiBase`（显式配置）> 从页面 URL 自动推导部署前缀（embed 场景 `/oes`、子路径反代 `/editor/oes` 等）> 同源根路径。embed 场景前端请求必须带 `/oes` 前缀才能命中引擎 nginx 反代。
+
+### 8.4 SSE 细节
+
+- 心跳间隔 30s（`setInterval(..., 30000)`），与设计一致；连接时通过响应头 `X-Accel-Buffering: no` 提示反代关闭缓冲。
+- SSE 无需 token（与 8.1 一致，无鉴权）。
+
+### 8.5 其余已按设计落地
+
+- REST 路由、SQLite 表结构、`comments.enabled`/`apiBase` 选项、comment mark 注册（`disableExtensions: ['comment']` 可关）、气泡菜单评论按钮（viewer 也显示）、左侧面板、状态栏 badge、级联删除接口均与设计一致。

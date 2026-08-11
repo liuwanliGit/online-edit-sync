@@ -26,18 +26,33 @@ server {
     listen 443 ssl;
     server_name biz.your-domain.com;
 
-    location /editor/ {
-        proxy_pass http://editor-host:9999/;
+    # 引擎专属路径 → 引擎容器 :9999（整段透传，不剥前缀）
+    location /oes/collab {
+        proxy_pass http://umo_engine;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
-        proxy_set_header Host $host;
         proxy_read_timeout 86400s;
         proxy_send_timeout 86400s;
-        client_max_body_size 20m;
+    }
+    location = /oes/embed {
+        proxy_pass http://umo_engine;
+    }
+    location /oes/embed/ {
+        proxy_pass http://umo_engine;
+    }
+    location /oes/api/ {
+        proxy_pass http://umo_engine;
+    }
+
+    # 其余 /oes/（页面、静态资源、业务 API）→ demo 容器 :9998
+    location /oes/ {
+        proxy_pass http://umo_demo;
     }
 }
 ```
+
+> 完整模板见 [nginx 同域反代配置](../api-reference/nginx-reverse-proxy.md) 与仓库 `docker/external-nginx.example.conf`。
 
 ---
 
@@ -71,8 +86,8 @@ server {
   async function openDoc(docId) {
     const { token, role } = await fetch(`/my-doc-token?doc=${docId}`).then(r => r.json())
     const mode = role === 'viewer' ? 'view' : 'edit'
-    // 同源：用相对路径
-    iframe.src = `/editor/embed?doc=${docId}&token=${token}&mode=${mode}`
+    // 同源：用相对路径（带 /oes 前缀）
+    iframe.src = `/oes/embed?doc=${docId}&token=${token}&mode=${mode}`
   }
 
   // ============ 2. 监听编辑器就绪 ============
@@ -171,8 +186,8 @@ server {
     // 1. 取高保真 HTML
     const html = await editor.getVanillaHTML()
 
-    // 2. 调 convert-server 转 docx（同源，相对路径）
-    const res = await fetch('/editor/api/convert/docx', {
+    // 2. 调 convert-server 转 docx（同源，相对路径带 /oes 前缀）
+    const res = await fetch('/oes/api/convert/docx', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ html, title: '我的文档' })

@@ -9,9 +9,9 @@
 同源直调要求 iframe 与父页面**同域**（同 protocol + host + port）。通常通过 [nginx 同域反代](./nginx-reverse-proxy.md) 实现：
 
 ```js
-// 业务系统 nginx 把引擎反代到 /editor/
-// iframe src: /editor/embed?doc=xxx&token=xxx （与父页面同域）
-iframe.src = `/editor/embed?doc=${docId}&token=${token}`
+// 业务系统 nginx 把引擎反代到 /oes/ 子路径
+// iframe src: /oes/embed?doc=xxx&token=xxx （与父页面同域）
+iframe.src = `/oes/embed?doc=${docId}&token=${token}`
 
 iframe.onload = () => {
   const editor = iframe.contentWindow.__UMO_EDITOR__  // 同源，直接拿
@@ -190,6 +190,21 @@ editor.setReadOnly(false)  // 切回可编辑
 
 - **参数**：`readOnly: boolean`（默认 `true`）
 
+### 评论（引擎内置）
+
+| 方法 | 说明 |
+| --- | --- |
+| `getComments()` | 获取当前文档的评论列表（响应式 ref） |
+| `toggleCommentPanel()` | 开关左侧评论面板 |
+
+```js
+const comments = editor.getComments()
+console.log(comments.value)   // 评论数组（reactive ref）
+editor.toggleCommentPanel(true)  // 打开评论面板
+```
+
+> 评论 UI（气泡按钮 / 左侧面板 / 状态栏入口）由引擎内置，业务系统无需实现评论后端。详见 [服务端接口 - 评论 API](./server-api.md#评论-api)。
+
 ### 书签
 
 #### `setBookmark(name)`
@@ -230,6 +245,37 @@ const bookmarks = editor.getAllBookmarks()
 ```js
 editor.deleteBookmark('chapter1')
 ```
+
+### 标签（UI 功能，无专用 API）
+
+引擎支持在文档中插入 / 编辑 / 删除「标签」（inline 节点，形如 `[重要]` 的高亮小标签），**但 `__UMO_EDITOR__` 与 postMessage 均未暴露标签专用方法**（如 `insertTag`），因此方法全集里看不到标签相关操作：
+
+| 操作 | 编辑器 UI 位置 |
+| --- | --- |
+| 插入 | 工具栏「插入 → 标签」（插入默认样式的标签） |
+| 编辑 | 点击标签选中后，气泡菜单支持：改文字 / 内置样式 / 文字颜色 / 背景色 |
+| 删除 | 气泡菜单「删除」按钮，或选中后按 Delete / Backspace |
+
+**同源直调可通过 Tiptap 底层实例操作标签**（`useEditor()` 返回 Tiptap Editor）：
+
+```js
+const tiptap = editor.useEditor()
+
+// 插入自定义标签（type / text / color / backgroundColor）
+tiptap.chain().focus().insertTag({
+  text: '重要',
+  color: '#ffffff',
+  backgroundColor: '#e24b4a',
+}).run()
+
+// 点击标签会选中该节点；修改选中标签的属性
+tiptap.chain().focus().updateAttributes('tag', { text: '紧急' }).run()
+
+// 删除选中的标签
+tiptap.chain().focus().deleteSelection().run()
+```
+
+> 标签节点渲染为 `<span data-type="tag">`，随 Yjs 协同自动同步；postMessage（跨域）无法直接操作标签，需走同源直调或由用户在编辑器中操作。
 
 ### 编辑器操作
 
@@ -339,7 +385,7 @@ editor.destroy()
 
 ```js
 const iframe = document.querySelector('#editor-frame')
-iframe.src = '/editor/embed?doc=123&token=xxx'
+iframe.src = '/oes/embed?doc=123&token=xxx'
 
 window.addEventListener('message', (e) => {
   if (e.data.type === 'ready') {
@@ -368,6 +414,10 @@ window.addEventListener('message', (e) => {
 
     // 打印
     editor.print()
+
+    // 评论（引擎内置）
+    console.log(editor.getComments().value)
+    editor.toggleCommentPanel(true)
 
     // 拿 Tiptap 底层实例（深度定制）
     const tiptap = editor.useEditor()

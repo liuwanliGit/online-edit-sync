@@ -1,19 +1,20 @@
 # Umo Editor 协同服务
 
-基于 **Hocuspocus + Yjs** 的协同编辑服务，为 Umo Editor 提供多人实时协同、JWT 鉴权、文档级权限控制和 SQLite 持久化。当前已完成阶段二（准生产）核心能力，单实例可支撑 5–20 人/篇的典型协同场景。
+基于 **Hocuspocus + Yjs** 的协同编辑服务，为 Umo Editor 提供多人实时协同、JWT 鉴权、文档级权限控制、SQLite 持久化和内置评论 API（REST + SSE）。单实例可支撑 5–20 人/篇的典型协同场景。
 
-> 完整的背景、技术细节、踩坑记录见仓库根目录的 [`COLLAB_HANDOFF.md`](../COLLAB_HANDOFF.md)。
+> 引擎的完整使用文档见仓库 [`docs/`](../docs/README.md)；本服务在 Docker 镜像中由引擎 nginx 统一反代（`/oes/*` 前缀）。
 
 ## 目录结构
 
 ```
 collab-server/
-├── server.js        # Hocuspocus 协同服务（端口 4000，WebSocket + HTTP 同端口）
-├── storage.js       # SQLite 存储层抽象（loadDoc / saveDoc / closeDb）
-├── e2e-test.mjs     # 端到端测试脚本
+├── server.js            # Hocuspocus 协同服务（端口 4000，WebSocket + HTTP 同端口）
+├── storage.js           # SQLite 存储层抽象（loadDoc / saveDoc / closeDb）
+├── comment-storage.js   # 评论存储层（独立 comments.db：REST + SSE）
+├── e2e-test.mjs         # 端到端测试脚本
 ├── package.json
-├── data/            # SQLite 数据目录（运行时生成，gitignore）
-└── client-example/  # 前端接入示例
+├── data/                # SQLite 数据目录（运行时生成，gitignore）
+└── client-example/      # 前端接入示例
 ```
 
 ## 能力一览
@@ -25,9 +26,10 @@ collab-server/
 | JWT 鉴权 | ✅ | HS256，服务端验证 + 文档级权限校验 |
 | 数据库持久化 | ✅ | SQLite（WAL 模式），重启不丢数据 |
 | 多文档编辑 | ✅ | URL 参数 `?doc=xxx` 指定文档，互不干扰 |
-| 编辑 / 只读权限 | ✅ | 三重保障：JWT role + 服务端 readOnly + 前端 setEditable |
+| 编辑 / 只读权限 | ✅ | JWT role + 服务端 readOnly 双重保障 |
+| 评论功能 | ✅ | 独立 comments.db，REST CRUD + SSE 实时推送（无鉴权，同源信任） |
 | 协作者图例 | ✅ | 状态栏头像组 + hover 详情浮层 |
-| 撤销 / 重做 | ⚠️ | undo 已修复；redo 仍有边界问题（见 handoff 第七节） |
+| 撤销 / 重做 | ⚠️ | undo 已修复；redo 仍有边界问题 |
 | 多实例横向扩展 | ❌ | 阶段三：`@hocuspocus/extension-redis` 跨节点广播 |
 | 监控 / 告警 | ❌ | 阶段三：Prometheus 指标 |
 
@@ -75,15 +77,17 @@ http://localhost:9000/umo-editor/?collab=1&doc=my-doc&role=viewer
 | `PORT` | `4000` | 服务端口（同端口提供 WebSocket + HTTP） |
 | `JWT_SECRET` | `umo-collab-secret-dev-only` | HS256 密钥，**生产环境务必通过环境变量设置强随机值** |
 | `JWT_EXPIRES_IN` | `24h` | JWT 有效期 |
+| `UMO_API_KEY` | 空 | 业务后端调 `/api/token` 的凭据（`x-api-key` header）。**留空为 dev 无鉴权模式（仅限本地开发）** |
+| `COMMENT_DB_PATH` | `data/comments.db` | 评论 SQLite 数据库路径（可选） |
 
 ```bash
 # 示例：自定义配置启动
-JWT_SECRET=$(openssl rand -hex 32) JWT_EXPIRES_IN=8h PORT=4000 npm start
+JWT_SECRET=$(openssl rand -hex 32) JWT_EXPIRES_IN=8h UMO_API_KEY=my-key PORT=4000 npm start
 ```
 
 ## API
 
-服务端口（默认 4000）同时承载 WebSocket 协同流量和一个 HTTP 端点：
+服务端口（默认 4000）同时承载 WebSocket 协同流量和 HTTP 端点：
 
 ### `GET /api/token`
 
@@ -91,6 +95,7 @@ JWT_SECRET=$(openssl rand -hex 32) JWT_EXPIRES_IN=8h PORT=4000 npm start
 
 | 参数 | 说明 |
 |---|---|
+| `x-api-key`（header） | `UMO_API_KEY` 凭据（配置后必填，否则 401） |
 | `name` | 用户名（缺省随机生成） |
 | `doc` | 文档名，写入 JWT claims，连接时做文档级权限校验 |
 | `role` | `editor`（默认，可编辑）或 `viewer`（只读，服务端拒绝 update） |
@@ -101,7 +106,12 @@ JWT_SECRET=$(openssl rand -hex 32) JWT_EXPIRES_IN=8h PORT=4000 npm start
 { "token": "<JWT>", "name": "alice", "doc": "demo-doc", "role": "editor" }
 ```
 
-> **安全提示**：当前 `/api/token` 端点无鉴权保护，便于 demo 验证。生产环境应由业务系统对该端点做登录态校验后再签发 token，避免任意人签发。
+> **安全提示**：`UMO_API_KEY` 未配置时 `/api/token` 无鉴权（dev 模式），生产环境务必配置，并由业务系统对该端点做登录态校验后再签发 token。
+
+### 评论 API（`/api/documents/:docId/comments` 等）
+
+- REST CRUD + SSE（`/stream`），**无鉴权（同源信任）**，详见 [服务端接口 - 评论 API](../docs/api-reference/server-api.md#评论-api)。
+- 外部访问经引擎 nginx 反代：`/oes/api/documents/...`、`/oes/api/comments/...`。
 
 ## 可用脚本
 
@@ -120,7 +130,7 @@ JWT_SECRET=$(openssl rand -hex 32) JWT_EXPIRES_IN=8h PORT=4000 npm start
 ### 1. 前端构建（在仓库根目录）
 
 ```bash
-cd D:\workspace\editor
+cd <仓库根目录>
 npm install
 npm run build        # 产物输出到 dist/（umo-editor.js / umo-editor.css）
 ```
@@ -216,5 +226,5 @@ SQLite 数据文件位于 `collab-server/data/collab.db`（WAL 模式下还有 `
 
 ## 演进路线
 
-- **阶段三（生产化）**：`@hocuspocus/extension-redis` 多实例广播、K8s + 优雅停机、Prometheus 监控、单房间人数上限与限流、`/api/token` 端点接业务系统鉴权。
-- **遗留**：协同 redo（undo 后 redo 栈被清空，详见 handoff 第七节）、权限管理 UI、用户颜色唯一性。
+- **阶段三（生产化）**：`@hocuspocus/extension-redis` 多实例广播、K8s + 优雅停机、Prometheus 监控、单房间人数上限与限流、评论 API 接 JWT/业务系统鉴权（当前为同源信任）。
+- **遗留**：协同 redo（undo 后 redo 栈被清空）、权限管理 UI、用户颜色唯一性。

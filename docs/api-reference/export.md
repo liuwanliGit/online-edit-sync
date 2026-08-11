@@ -1,10 +1,21 @@
-# 导出与文件回传（方案 B3）
+# 导出与文件回传
 
-> 用户在业务系统点「导出 Word」时，业务后端需要拿到导出的 docx 文件。本页说明引擎的导出方案 B3：iframe 把文件**直接 POST 推给业务后端**。
+> 用户在业务系统点「导出 Word」时，引擎提供两种导出路径。本页重点说明**方案 B3**：iframe 把文件**直接 POST 推给业务后端**。
 
 ---
 
-## 场景
+## 两种导出路径
+
+| 路径 | 触发方式 | 文件去向 | 适用场景 |
+| --- | --- | --- | --- |
+| **工具栏导出（零配置）** | 编辑器工具栏「导出 Word」按钮 | 浏览器直接下载 docx | 不需要业务后端保存文件，用户自取即可 |
+| **方案 B3 回传** | 父页面 postMessage `export` | POST 推给业务后端 callbackUrl → 返回下载链接 | 业务系统需要存档 / 转存对象存储 / 展示下载链接 |
+
+两条路径都走「前端已渲染的 HTML → `/oes/api/convert/docx` 转 docx」，保真度一致。本页重点讲方案 B3。
+
+---
+
+## 场景（方案 B3）
 
 用户在业务系统点「导出 Word」，需要：
 
@@ -41,7 +52,7 @@
 
 ② iframe 内:
    - html = editor.getVanillaHTML()        // 高保真（前端已渲染）
-   - blob = await /api/convert/docx 转 docx
+   - blob = await /oes/api/convert/docx 转 docx
    - POST blob 到 callbackUrl              // 直接推给业务后端（header: x-api-key）
    - postMessage 回前端: { type:'export:result', id:'r1', ok:true, url:'<URL>' }
 
@@ -119,8 +130,8 @@ iframe.onload = async () => {
   // 1. 取高保真 HTML
   const html = await editor.getVanillaHTML()
 
-  // 2. 调 convert-server 转 docx（同源，相对路径）
-  const res = await fetch('/editor/api/convert/docx', {
+  // 2. 调 convert-server 转 docx（同源，相对路径带 /oes 前缀）
+  const res = await fetch('/oes/api/convert/docx', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ html, title: '我的文档' })
@@ -239,7 +250,7 @@ public class ReceiveDocController {
 ### 业务前端
 
 ```html
-<iframe id="editor" src="/editor/embed?doc=123&token=xxx"></iframe>
+<iframe id="editor" src="/oes/embed?doc=123&token=xxx"></iframe>
 <button onclick="exportDocx()">导出 Word</button>
 
 <script>
@@ -287,6 +298,6 @@ app.post('/api/receive-doc', upload.single('file'), async (req, res) => {
 
 ## 下一步
 
-- [服务端接口](./server-api.md) —— `/api/convert/docx` 详情
+- [服务端接口](./server-api.md) —— `/oes/api/convert/docx` 详情
 - [postMessage 协议](./postmessage-protocol.md) —— export 消息在协议中的位置
 - [完整示例（跨域）](../samples/minimal-cross-domain.md)

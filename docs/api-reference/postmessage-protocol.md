@@ -7,7 +7,7 @@
 ## 协议概览
 
 ```
-父页面（业务前端）                          iframe（引擎 /embed）
+父页面（业务前端）                          iframe（引擎 /oes/embed）
      │                                            │
      │  ① postMessage({ type, id, ...args })       │
      │ ─────────────────────────────────────────→  │
@@ -23,6 +23,8 @@
 - **响应**（iframe → 父页面）：`{ type: '<method>:result', id: '<reqId>', ok: true|false, data | error }`
 
 `id` 用于匹配请求与响应。
+
+> 除了请求/响应，还有两类「配置」消息：embed 挂载时发 `request-config` 请求业务配置，父页面回传 `config`。详见下文 [引擎主动推送的消息](#引擎主动推送的消息)。
 
 ---
 
@@ -121,6 +123,8 @@ window.addEventListener('message', (e) => {
 | `focusBookmark` | `{ name: string }` | `{ ok: boolean }` | 定位书签 |
 | `getAllBookmarks` | 无 | 书签数组 | 获取全部书签 |
 
+> 删除书签 `deleteBookmark` 仅同源直调可用（未加入 postMessage 分发），跨域场景可改为同源直调或忽略。
+
 ### 其他
 
 | `type` | 参数 | 响应 `data` | 说明 |
@@ -139,6 +143,31 @@ window.addEventListener('message', (e) => {
 
 除了请求-响应，引擎还会主动向父页面推送以下消息：
 
+### `request-config`
+
+embed 挂载时向父页面请求业务配置。父页面应回传 `{ type: 'config', payload }`（见下）。若 3 秒内未响应，embed 使用默认配置继续加载。
+
+```js
+{ type: 'request-config' }
+```
+
+### `config`
+
+父页面回传给 embed 的业务配置（模板 / @提及用户 / 书签显示 / 分享与 CDN 地址），由业务系统控制：
+
+```js
+{
+  type: 'config',
+  payload: {
+    templates: [{ title: '工作任务', description: '工作任务模板', content: '<h1>...</h1>' }],
+    users: [{ id: 'alice', label: 'Alice', color: '#e06c75' }],
+    page: { showBookmark: true },
+    shareUrl: 'https://share.example.com/s/xxx',   // 可选
+    cdnUrl: 'https://cdn.example.com',              // 可选
+  }
+}
+```
+
 ### `ready`
 
 编辑器创建完成，可以开始交互。
@@ -155,13 +184,13 @@ window.addEventListener('message', (e) => {
 {
   type: 'awareness',
   collaborators: [
-    { name: '张三', color: '#e06c75' },
-    { name: '李四', color: '#56b6c2' }
+    { clientId: 123, user: { id: 'u1', name: '张三', color: '#e06c75', role: 'editor' } },
+    { clientId: 456, user: { id: 'u2', name: '李四', color: '#56b6c2', role: 'viewer' } },
   ]
 }
 ```
 
-业务前端可据此展示在线协作者列表。
+业务前端可据此展示在线协作者列表（头像 / 名字 / 角色徽章）。
 
 ### `export:result`
 

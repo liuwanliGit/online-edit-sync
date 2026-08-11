@@ -1,14 +1,16 @@
 # iframe URL 参数
 
-> `/embed` 页面是引擎的 iframe 着陆页（纯编辑器页）。本页说明其 URL 参数契约。
+> `/oes/embed` 页面是引擎的 iframe 着陆页（纯编辑器页）。本页说明其 URL 参数契约。
 
 ---
 
 ## URL 格式
 
 ```
-GET <engineUrl>/embed?doc=<docId>&token=<jwt>&mode=<edit|view>&lang=<zh-CN|en-US>&title=<文档标题>
+GET <engineUrl>/oes/embed?doc=<docId>&token=<jwt>&mode=<edit|view>&lang=<zh-CN|en-US>&title=<文档标题>
 ```
+
+其中 `<engineUrl>` 是带 `/oes` 前缀的引擎地址，如 `http://editor-host:9999/oes`。
 
 ---
 
@@ -34,7 +36,7 @@ GET <engineUrl>/embed?doc=<docId>&token=<jwt>&mode=<edit|view>&lang=<zh-CN|en-US
 - 类型：`string`（JWT 格式：`xxx.yyy.zzz`）
 - 含义：协同连接鉴权令牌
 - 用途：直接传给 HocuspocusProvider 作为协同连接的 `token`
-- 约束：必须由业务后端持 `UMO_API_KEY` 调引擎 `/api/token` 签发
+- 约束：必须由业务后端持 `UMO_API_KEY` 调引擎 `/oes/api/token` 签发
 
 ```url
 ?token=eyJhbGciOiJIUzI1NiJ9.eyJuYW1lIjoi...
@@ -87,7 +89,7 @@ GET <engineUrl>/embed?doc=<docId>&token=<jwt>&mode=<edit|view>&lang=<zh-CN|en-US
 ## 完整示例
 
 ```url
-http://editor-host:9999/embed?doc=doc-123&token=eyJhbGciOiJIUzI1NiJ9...&mode=edit&lang=zh-CN&title=我的文档
+http://editor-host:9999/oes/embed?doc=doc-123&token=eyJhbGciOiJIUzI1NiJ9...&mode=edit&lang=zh-CN&title=我的文档
 ```
 
 ---
@@ -99,12 +101,12 @@ http://editor-host:9999/embed?doc=doc-123&token=eyJhbGciOiJIUzI1NiJ9...&mode=edi
 ```js
 import { getEmbedUrl, getEngineUrl } from '@/utils/engine-config'
 
-// 获取引擎根地址
-const engineUrl = getEngineUrl()  // 默认 http://localhost:9999
+// 获取引擎根地址（带 /oes 前缀）
+const engineUrl = getEngineUrl()  // 默认 http://localhost:9999/oes
 
 // 构造 embed URL
 const url = getEmbedUrl('doc-123', '<jwt>', 'edit', 'zh-CN', '我的文档')
-// → "http://localhost:9999/embed?doc=doc-123&token=...&mode=edit&lang=zh-CN&title=我的文档"
+// → "http://localhost:9999/oes/embed?doc=doc-123&token=...&mode=edit&lang=zh-CN&title=我的文档"
 ```
 
 `getEmbedUrl` 签名：
@@ -119,13 +121,14 @@ function getEmbedUrl(
 ): string
 ```
 
-引擎地址解析规则：
+引擎地址解析规则（优先级从高到低）：
 
 | 设置方式 | 结果 |
 | --- | --- |
-| 未设置 | 兜底 `http://localhost:9999` |
-| `window.__UMO_ENGINE_URL__ = 'http://editor-host:9999'` | 用该地址 |
-| `window.__UMO_ENGINE_URL__ = '/editor'` | 反代同源前缀 |
+| `window.__UMO_CONFIG__.engineUrl = 'http://editor-host:9999/oes'` | 用该地址（部署时由 `config.js` 注入，推荐） |
+| `window.__UMO_ENGINE_URL__ = 'http://editor-host:9999/oes'` | 用该地址（兼容旧用法） |
+| `window.__UMO_ENGINE_URL__ = '/oes'` | 反代同源前缀（iframe 与父页面同域） |
+| 未设置 | 兜底 `http://localhost:9999/oes` |
 
 ---
 
