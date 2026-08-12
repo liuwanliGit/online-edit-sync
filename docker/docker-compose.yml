@@ -18,7 +18,8 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: umo-editor-engine:latest
+    # 构建产物 tag 为阿里云镜像仓库地址，便于手动 docker push 推送
+    image: crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/oes-engine:latest
     container_name: umo-editor-engine
     ports:
       - "9999:9999"
@@ -47,7 +48,8 @@ services:
     build:
       context: ..
       dockerfile: demo/docker/Dockerfile
-    image: umo-editor-demo:latest
+    # 构建产物 tag 为阿里云镜像仓库地址，便于手动 docker push 推送
+    image: crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/oes-demo:latest
     container_name: umo-editor-demo
     ports:
       - "9998:9998"

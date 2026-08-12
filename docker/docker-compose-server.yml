@@ -1,11 +1,13 @@
 # =============================================================================
-# Umo Editor 全栈编排（仅启动已导入镜像，无构建）
-# 启动命令：docker compose up -d
+# Umo Editor 全栈编排（从阿里云镜像仓库拉取已发布镜像，无构建）
+# 启动命令：docker compose -f docker/docker-compose-server.yml up -d
+# 首次会自动拉取镜像；如未登录阿里云仓库，需先：
+#   docker login crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com
 # =============================================================================
 
 services:
   umo-editor-engine:
-    image: umo-editor-engine:latest          # 使用已导入的引擎镜像
+    image: crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/oes-engine:latest
     container_name: umo-editor-engine
     ports:
       - "9999:9999"
@@ -26,7 +28,7 @@ services:
       start_period: 20s
 
   umo-editor-demo:
-    image: umo-editor-demo:latest            # 使用已导入的 demo 镜像
+    image: crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/oes-demo:latest
     container_name: umo-editor-demo
     ports:
       - "9998:9998"

@@ -13,11 +13,34 @@
 
 > 提示：可用 `openssl rand -hex 32` 或 `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` 生成密钥。
 
+### 镜像地址
+
+镜像发布在阿里云镜像仓库（香港地域），两个镜像：
+
+| 镜像 | 地址 |
+| --- | --- |
+| 引擎 | `crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/oes-engine:latest` |
+| demo | `crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/oes-demo:latest` |
+
+> 私有仓库需先登录：`docker login crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com`（用阿里云账号 + 仓库访问凭证）。
+
 ---
 
 ## 方式一：docker compose 全栈部署（推荐）
 
-仓库自带 `docker/docker-compose.yml`，一键启动 **引擎 + demo 瘦客户端示例** 两个容器：
+仓库自带两个 compose 文件，按需选用：
+
+### A. 从阿里云拉取已发布镜像（无需本地构建）
+
+用 `docker/docker-compose-server.yml`，首次会自动拉取镜像：
+
+```bash
+docker compose -f docker/docker-compose-server.yml up -d
+```
+
+### B. 本地源码构建（开发 / 自定义修改）
+
+用 `docker/docker-compose.yml`，从源码构建并 tag 为阿里云仓库地址：
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d --build
@@ -28,6 +51,14 @@ docker compose -f docker/docker-compose.yml up -d --build
 - **Linux/macOS**：`bash docker/build.sh up`
 - **Windows**：`docker\build.bat`
 
+构建产物会 tag 成阿里云仓库地址，需要时可手动推送（脚本不会自动推）：
+
+```bash
+docker login crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com
+docker push crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/oes-engine:latest
+docker push crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/oes-demo:latest
+```
+
 启动后：
 
 | 容器 | 对外端口 | 用途 |
@@ -37,8 +68,6 @@ docker compose -f docker/docker-compose.yml up -d --build
 
 - demo 示例入口：`http://localhost:9998/oes/demo/`（登录后即可体验协同编辑）
 - 引擎入口：`http://localhost:9999/oes/embed?doc=<docId>&token=<jwt>`
-
-> 仅启动已导入的镜像（不重新构建）：`docker compose -f docker/docker-compose-server.yml up -d`
 
 ---
 
@@ -55,7 +84,7 @@ docker run -d \
   -e JWT_EXPIRES_IN=24h \
   -v umo-collab-data:/app/collab-server/data \
   --restart unless-stopped \
-  umo-editor-engine:latest
+  crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/oes-engine:latest
 ```
 
 ---
@@ -161,8 +190,15 @@ supervisorctl status
 ## 升级镜像
 
 ```bash
-docker pull umo-editor-engine:latest
-docker stop umo-editor && docker rm umo-editor
+# 拉取最新镜像
+docker pull crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/oes-engine:latest
+docker pull crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/oes-demo:latest
+
+# 用 compose 重启（自动用新镜像重建容器，数据卷保留）
+docker compose -f docker/docker-compose-server.yml up -d
+
+# 或单独重启引擎
+docker stop umo-editor-engine && docker rm umo-editor-engine
 # 重新执行 docker run（数据卷保留）
 ```
 

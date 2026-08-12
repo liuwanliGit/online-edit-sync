@@ -33,18 +33,30 @@ else
   exit 1
 fi
 
+# 阿里云镜像仓库地址（构建产物 tag，手动推送用）
+REGISTRY="crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com"
+ENGINE_IMAGE="$REGISTRY/1049/oes-engine:latest"
+DEMO_IMAGE="$REGISTRY/1049/oes-demo:latest"
+
 ACTION="${1:-build}"
 
 case "$ACTION" in
   build)
-    echo "🏗️  开始构建引擎镜像 umo-editor-engine:latest ..."
+    echo "🏗️  开始构建镜像（引擎 + demo）..."
     echo "   build context: $REPO_ROOT"
     echo "   compose file : $COMPOSE_FILE"
     $DC -f "$COMPOSE_FILE" build
     echo ""
-    echo "✅ 构建完成。"
-    echo "   启动：  bash docker/build.sh up"
-    echo "   健康检查：curl http://localhost:9999/oes/api/health"
+    echo "✅ 构建完成。镜像已 tag 为阿里云仓库地址："
+    echo "   引擎: $ENGINE_IMAGE"
+    echo "   demo : $DEMO_IMAGE"
+    echo ""
+    echo "   启动：        bash docker/build.sh up"
+    echo "   健康检查：    curl http://localhost:9999/oes/api/health"
+    echo ""
+    echo "   推送到阿里云（需先 docker login $REGISTRY，按需手动执行）："
+    echo "     docker push $ENGINE_IMAGE"
+    echo "     docker push $DEMO_IMAGE"
     ;;
 
   up)

@@ -89,7 +89,7 @@ docker run -d \
   -e JWT_EXPIRES_IN=24h \
   -v umo-collab-data:/app/collab-server/data \
   --restart unless-stopped \
-  umo-editor-engine:latest
+  crpi-h7gzaxnskayufpzy.cn-hongkong.personal.cr.aliyuncs.com/1049/oes-engine:latest
 ```
 
 ### 验证启动
