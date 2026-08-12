@@ -35,10 +35,9 @@
         <t-button
           theme="default"
           variant="outline"
-          shape="square"
-          @click="panelOpen = !panelOpen"
+          @click="togglePanel"
         >
-          <template #icon><t-icon :name="panelOpen ? 'format-horizontal-align-center' : 'setting'" /></template>
+          <template #icon><t-icon :name="panelOpen ? 'chevron-right' : 'play-circle'" /></template>
           {{ panelOpen ? '收起面板' : '交互演示' }}
         </t-button>
       </div>
@@ -83,10 +82,23 @@
       <!-- 交互演示面板 -->
       <transition name="slide">
         <aside v-show="panelOpen" class="demo-panel">
-          <h3 class="panel-title">
-            <t-icon name="play-circle" />
-            交互演示
-          </h3>
+          <div class="panel-head">
+            <h3 class="panel-title">
+              <t-icon name="play-circle" />
+              交互演示
+            </h3>
+            <t-button
+              class="panel-close"
+              theme="default"
+              variant="text"
+              shape="square"
+              size="small"
+              :aria-label="'收起交互演示面板'"
+              @click="togglePanel"
+            >
+              <template #icon><t-icon name="chevron-right" /></template>
+            </t-button>
+          </div>
           <p class="panel-desc">
             以下四个场景对应
             <a :href="guideUrl" target="_blank">接入指南</a>
@@ -240,9 +252,20 @@ const iframeSrc = ref('')
 const editorReady = ref(false)
 const tokenData = ref(null)
 
-// 面板
-const panelOpen = ref(true)
+// 面板：默认折叠，记住用户偏好（localStorage）
+const panelOpen = ref(
+  typeof window !== 'undefined' && localStorage.getItem('demo-panel-open') === '1',
+)
 const guideUrl = 'https://github.com/umoteam/umo-editor/blob/main/EMBED_INTEGRATION_GUIDE.md'
+
+function togglePanel() {
+  panelOpen.value = !panelOpen.value
+  try {
+    localStorage.setItem('demo-panel-open', panelOpen.value ? '1' : '0')
+  } catch {
+    // 隐私模式等场景下忽略持久化失败
+  }
+}
 
 // ============ 下发给 embed 的业务配置（postMessage config 握手） ============
 // embed 挂载时向父页面请求 { type:'request-config' }，父页面回传 { type:'config', payload }。
@@ -587,8 +610,15 @@ onUnmounted(() => {
   overflow-y: auto;
   padding: 16px 18px 24px;
 }
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
 .panel-title {
-  margin: 0 0 6px;
+  margin: 0;
   font-size: 16px;
   font-weight: 700;
   display: flex;
@@ -598,6 +628,14 @@ onUnmounted(() => {
 }
 .panel-title .t-icon {
   color: var(--demo-primary);
+}
+.panel-close {
+  flex-shrink: 0;
+  color: var(--demo-text-tertiary);
+}
+.panel-close:hover {
+  color: var(--demo-text);
+  background: var(--demo-bg);
 }
 .panel-desc {
   margin: 0 0 20px;
