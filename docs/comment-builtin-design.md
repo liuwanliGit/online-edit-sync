@@ -200,6 +200,9 @@ CREATE INDEX IF NOT EXISTS idx_comments_doc ON comments(doc_id);
 
 **鉴权策略：JWT 复用**
 
+> ⚠️ **本节为早期设计，实际实现不同——以 8.1 节（无鉴权·同源信任）和第九章（commenter 角色）为准。**
+> 本节保留作为设计推演记录，请勿据此实现（评论 API 实际无 JWT 鉴权；评论角色为 commenter 而非 viewer）。
+
 评论 API 复用协同连接的 JWT 鉴权，不再使用 `x-api-key`：
 
 - 前端调用评论 API 时，在 `Authorization: Bearer <token>` 头中带上当前文档的协同 JWT
@@ -332,8 +335,8 @@ if (options.comments?.enabled !== false && !disabledList.includes('comment')) {
 改为在 `src/components/menus/bubble/menus.vue` 内部直接渲染：
 
 ```vue
-<!-- 在气泡菜单按钮组末尾，当 comments.enabled 时显示（editor + viewer 均可评论） -->
-<template v-if="commentsEnabled">
+<!-- 在气泡菜单按钮组末尾，当 canComment 时显示（editor + commenter 可评论，viewer 不可） -->
+<template v-if="canComment">
   <span class="umo-bubble-menu-divider"></span>
   <button class="umo-bubble-menu-btn" @mousedown.prevent="captureSelection" @click="onComment">
     {{ t('comment.add') }}
@@ -341,10 +344,14 @@ if (options.comments?.enabled !== false && !disabledList.includes('comment')) {
 </template>
 ```
 
-> **viewer 模式也显示评论按钮**：评论权限不随文档编辑权限走，只读用户也可以对
-> 文档内容发表评论。TipTap bubble menu 默认在 readOnly 下不显示（`shouldShow` 检查
-> `editor.isEditable`），需要为评论按钮覆盖此行为：当选中文本且 comments 启用时
-> 强制显示评论按钮（即使编辑器是 readOnly）。
+> **commenter 模式（readOnly）也显示评论按钮**：评论权限不随文档编辑权限走，
+> commenter（只读用户）也可以对文档内容发表评论。TipTap bubble menu 默认在 readOnly
+> 下不显示（`shouldShow` 检查 `editor.isEditable`），需要为评论按钮覆盖此行为：当选中文本
+> 且 `canComment` 为 true 时强制显示评论按钮（即使编辑器是 readOnly）。
+>
+> > ⚠️ 实现：气泡菜单的 `shouldShow` 用 `canComment`（= 评论功能开启 且 角色非 viewer）判断，
+> > 而非旧的 `commentsEnabled`。**viewer 不再弹出气泡菜单、不可评论**；commenter 弹出（仅评论按钮）。
+> > commenter 的评论 mark 由服务端代写（第九章）。
 
 #### viewer 模式 bubble menu 显示方案
 
@@ -611,6 +618,11 @@ location /oes/api/documents/ {
    不显示，需要自定义 `shouldShow` 覆盖——当选中文本且 comments 启用时强制弹出气泡菜单
    （仅评论按钮可见，编辑类按钮自身检查 isEditable 自行隐藏）
 
+   > ⚠️ **本条已被第九章取代**：实际实现中 viewer 不再可评论，新增 **commenter** 角色承担"只读+可评论"。
+   > commenter 的协同连接同样为 readOnly，但评论的 comment mark 由服务端代写到 Yjs 文档
+   > （viewer 的协同连接 readOnly 导致本地 setMark 的 update 被丢弃，刷新/他端无法定位）。
+   > 详见第九章。本设计决策保留作为历史记录。
+
 2. **导出 HTML 保留 comment mark**：`getHTML()` / `getContent()` 默认保留 `<span data-comment-id>`
    mark。导出的 HTML 包含评论标记，业务系统可据此识别哪些文字有评论。Comment mark 的
    `renderHTML` 已经输出 `data-comment-id` 属性，无需额外处理
@@ -632,7 +644,7 @@ location /oes/api/documents/ {
 ### 8.1 鉴权：设计为 JWT 复用，实现为「无鉴权（同源信任）」
 
 - **设计**（本文 4.2 节）：评论 API 复用协同 JWT，`Authorization: Bearer <token>` 鉴权，校验 `payload.doc === docId` 防越权。
-- **实现**（`collab-server/comment-storage.js`）：评论 API **无鉴权**。理由：collab-server 的 4000 端口在 Docker 中不对外暴露，评论 API 只能经引擎 nginx 同源反代访问，依赖「同源信任」即可。viewer 与 editor 均可读写评论。
+- **实现**（`collab-server/comment-storage.js`）：评论 API **无鉴权**。理由：collab-server 的 4000 端口在 Docker 中不对外暴露，评论 API 只能经引擎 nginx 同源反代访问，依赖「同源信任」即可。`editor` / `commenter` / `viewer` 均可读写评论。
 - **影响**：业务系统直接调用评论 REST 时无需带 JWT；若将评论 API 暴露到公网（不推荐），需自行在业务侧加鉴权。
 
 ### 8.2 组件路径：`src/components/comment/` → `src/components/container/comment/`
@@ -650,4 +662,101 @@ location /oes/api/documents/ {
 
 ### 8.5 其余已按设计落地
 
-- REST 路由、SQLite 表结构、`comments.enabled`/`apiBase` 选项、comment mark 注册（`disableExtensions: ['comment']` 可关）、气泡菜单评论按钮（viewer 也显示）、左侧面板、状态栏 badge、级联删除接口均与设计一致。
+- REST 路由、SQLite 表结构、`comments.enabled`/`apiBase` 选项、comment mark 注册（`disableExtensions: ['comment']` 可关）、气泡菜单评论按钮（**commenter 显示，viewer 不显示**——见第九章）、左侧面板、状态栏 badge、级联删除接口均与设计一致。
+
+> ### ⚠️ 第一~七章关于「viewer 可评论」的设计已被第九章取代
+>
+> 本文档前八章（尤其 4.7 节气泡菜单、六.1 设计决策）描述的"viewer 可评论"是基于二角色模型
+> （editor/viewer）的早期设计。**实际落地时发现**：viewer 的协同连接被 `connection.readOnly` 拦截，
+> 本地 `setMark` 的 update 被服务端丢弃，导致评论刷新/他端无法定位。因此引入了第三个角色
+> **commenter**（只读 + 可评论，mark 由服务端代写），viewer 改为纯只读不可评论。
+> **第九章为权威实现，前八章的 viewer 评论描述仅作历史记录保留。**
+
+---
+
+## 九、commenter 角色：查看模式下可评论（服务端代写 mark）
+
+> 2026-08 增量设计。解决「查看模式（viewer）评论后，刷新或他端无法定位」的问题。
+
+### 9.1 问题根因
+
+原设计中 viewer 也能评论（气泡菜单对 readOnly 强制弹出），但 viewer 的协同连接被 `connection.readOnly = true` 拦截，本地 `setMark` 触发的 Yjs update 被服务端丢弃——不 apply、不广播。结果：
+
+- **本地 viewer**：DOM 有 `data-comment-id`，点击能定位（假象可用）
+- **其他端 / 刷新后**：Yjs 文档无该 mark → DOM 无 span → `querySelector` 返回 null → **评论点不动**
+
+Hocuspocus 的 `readOnly` 是全有或全无的布尔开关，无法「只放行 comment mark update」；`beforeHandleMessage` 抛异常会断开整个连接，无法软丢弃单条 update。
+
+### 9.2 解决方案：新增 commenter 角色 + 服务端代写 mark
+
+**三种角色**：
+
+| 角色 | 能力 | 协同连接 | mark 写入通道 |
+|---|---|---|---|
+| `editor` | 查看+编辑+评论+辅助 | 可编辑 | 本地 setMark，经自己连接同步 |
+| `commenter`（新增）| 查看+评论+辅助，**不可改正文** | readOnly | HTTP 提交相对位置，**服务端代写** |
+| `viewer` | 纯查看 | readOnly | 无（不可评论）|
+
+**服务端代写**：commenter 的评论位置（Yjs RelativePosition）随 HTTP 提交，collab-server 用 `server.openDirectConnection(docId).transact(doc => {...})` 直接在服务端 Y.Doc 上 `format` comment mark，修改经 Y.Doc update 事件自动广播给所有协同连接（含 commenter 自己）。无需建「内部 editor WebSocket 连接」。
+
+### 9.3 数据流
+
+```
+commenter 端（readOnly 协同连接）
+  ① 选中文本 [from,to)
+  ② y-prosemirror 的 absolutePositionToRelativePosition 转 RelativePosition
+     （相对位置绑在 item 上，并发编辑时自动漂移到正确文字）
+  ③ 本地不 setMark
+  ④ POST /api/comments { id, anchor:{fromRel,toRel}, selectedText, content }
+       ──────────────────────────────▶ collab-server
+                                      ⑤ 存 comments.db
+                                      ⑥ openDirectConnection(docId).transact(doc => {
+                                           解析 fromRel/toRel → 当前 offset
+                                           读区间文字与 selectedText 比对，不一致 throw（事务回滚）
+                                           yXmlText.format(off, len, {comment:{commentId,resolved:false}})
+                                         })
+                                      ⑦ Y.Doc update 事件 → Hocuspocus 广播给所有连接
+                                      ⑧ SSE comment:added
+所有端收到 Yjs update → DOM 出现 <span data-comment-id> → querySelector 命中 → scrollIntoView ✓
+```
+
+resolve / delete 同理：commenter 的 PATCH/DELETE 带 `serverWrite: true`，服务端按 commentId 扫描 mark 区间后代写（改 resolved / format null 移除）。
+
+### 9.4 三项并发缓解措施
+
+1. **相对位置提交**：commenter 前端用 `Y.createRelativePositionFromTypeIndex` 提交，editor 并发插入/删除时相对位置自动漂移到正确文字。
+2. **selectedText 校验**：服务端代写前读区间当前文字与提交快照比对，不一致（文字被删/已变/position 失效）→ 事务回滚、返回 409，前端提示重新选中。
+3. **commentFocus 轮询**：点击评论定位时，mark 可能尚未从协同广播落地，`commentFocus` 查不到 DOM 元素时轮询等待（上限 1.5s），命中后再滚动。
+
+### 9.5 服务端 position 映射（`collab-server/yjs-position.js`）
+
+服务端无 ProseMirror schema，无法用 y-prosemirror 的 position 工具，手写 ProseMirror 绝对 position → Y.XmlText 相对 offset 映射。ProseMirror position 模型（经 prosemirror-model 验证）：每个 block 占 `nodeSize = 2 + 内容长度` 个 pos（开标签1 + 内容 + 闭标签1），XmlText 内 pos 直接当 index 用。
+
+### 9.6 角色识别与传递
+
+- **embed 瘦客户端**：URL `mode=comment` 或 JWT `role=commenter` claim → `options.user.role = 'commenter'`、awareness role、`readOnly: true`
+- **引擎**：`options.user.role` → `commentUserRole` / `isCommenter` / `canComment`（= commentsEnabled 且 role ≠ viewer）
+- **气泡菜单**：`shouldShow` 用 `canComment`（commenter 弹、viewer 不弹）；评论按钮 `v-if="canComment"`
+- **状态栏徽章**：editor→编辑、commenter→评论（琥珀色）、viewer→只读（灰色）
+
+### 9.7 并发语义边界
+
+- **同区间同 key 不同 value 并发**（服务端写 commentId:A 与 editor 写 commentId:B 重叠）：CRDT 按 clientID+clock 拓扑序保留其一，属 Yjs 既有 last-write 语义，概率极低，局部影响。
+- **HTTP 代写绕过 readOnly**：commenter 能通过 HTTP 让服务端以编辑权限写 mark，依赖「同源信任 + 限频（单 docId 每分钟 60 次）+ 范围校验」防护。
+
+### 9.8 涉及文件（增量）
+
+| 文件 | 改动 |
+|---|---|
+| `collab-server/yjs-position.js`（新增）| position 映射、按 commentId 扫描、setMark/removeMark |
+| `collab-server/server.js` | commenter 角色签发；传 server 给 commentStorage |
+| `collab-server/comment-storage.js` | 接收 server；POST/PATCH/DELETE 代写 mark；selectedText 校验；限频 |
+| `embed/src/App.vue` | mode=comment 识别、readOnly、awareness role、user.role |
+| `src/app.vue` | commenter role 支持、readOnly、user.role |
+| `src/components/index.vue` | commentAdd 按角色分流（editor 本地 setMark / commenter 提交 anchor）；commentResolve/Delete 分流；commentFocus 轮询；canComment/isCommenter provide |
+| `src/composables/comment.js` | addComment 透传 anchor；updateComment/deleteComment 支持 serverWrite |
+| `src/components/menus/bubble/index.vue` | shouldShow 用 canComment |
+| `src/components/menus/bubble/menus.vue` | 评论按钮 v-if=canComment |
+| `src/components/statusbar/index.vue` | commenter 角色徽章 |
+| `src/assets/styles/editor.less` | is-commenter 样式 |
+| `demo/` | 登录页 commenter 选项、auth store、EditorView 角色徽章、server 代理三角色 |

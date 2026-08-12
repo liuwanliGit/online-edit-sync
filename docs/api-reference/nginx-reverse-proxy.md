@@ -17,18 +17,17 @@
 
 ## 部署拓扑与前缀设计
 
-引擎的所有路径**前缀已固定烧进镜像**，外层 nginx 只需**整段透传**（`proxy_pass` 不带尾斜杠，不剥前缀）：
+引擎与 demo 的路径前缀**已固定烧进镜像**，外层 nginx 用前缀分流即可（`proxy_pass` 不带尾斜杠，整段透传）：
 
+- **demo 示例**：`/oes/demo/*`（页面、静态资源、demo 后端 API）
 - **引擎前端**：`/oes/embed`（着陆页）、`/oes/embed/*`（静态资源）
-- **引擎 API/WS**：`/oes/api/token`、`/oes/api/health`、`/oes/api/convert/*`、`/oes/collab`(WS)、`/oes/api/documents/*`、`/oes/api/comments/*`
-- **demo 示例**：其余 `/oes/*`（页面、静态资源、demo 后端 API）
+- **引擎 API/WS**：`/oes/api/*`（token / health / convert / 评论 REST）、`/oes/collab`(WS)
 
-单域名部署时，nginx 按**最长前缀匹配**把引擎专属路径转给引擎容器（`:9999`），其余 `/oes/*` 转给 demo 容器（`:9998`）。
+单域名部署时，nginx 用**前缀分流**：`/oes/demo/` 转 demo 容器（`:9998`），`/oes/` 其余全部转引擎容器（`:9999`）。只有 WebSocket 和评论 SSE 需要特殊代理头（升级头 / 关缓冲），单独列出。
 
 ```
-https://your-domain/oes/embed、/oes/embed/*、/oes/collab、/oes/api/convert、/oes/api/token
-                                                          → 引擎容器 :9999
-https://your-domain/oes/  （页面、静态资源、业务 /api/documents 等）   → demo 容器 :9998
+https://your-domain/oes/demo/  （demo 页面、静态资源、业务 API）   → demo 容器 :9998
+https://your-domain/oes/*       （embed / collab / api 等，引擎专属）→ 引擎容器 :9999
 ```
 
 ---
@@ -59,9 +58,18 @@ server {
 
     client_max_body_size 20m;   # 导出 docx 可能较大
 
-    # ---- 引擎专属路径（优先匹配，转给引擎容器）----
+    # ---- 根路径跳转到 demo 入口 ----
+    location = / {
+        return 302 /oes/demo/;
+    }
 
-    # 协同 WebSocket：必须单独 location 处理升级头
+    # ---- demo：页面 + 静态资源 + 业务 API（整段转 demo 容器）----
+    location /oes/demo/ {
+        proxy_pass http://umo_demo;
+        proxy_set_header Host $host;
+    }
+
+    # ---- 引擎：协同 WebSocket（必须单独 location 处理升级头）----
     location /oes/collab {
         proxy_pass http://umo_engine;
         proxy_http_version 1.1;
@@ -72,35 +80,23 @@ server {
         proxy_send_timeout 86400s;
     }
 
-    # 引擎 iframe 着陆页
-    location = /oes/embed {
+    # ---- 引擎：评论 SSE（正则优先匹配，关缓冲，避免事件被攒批/掐断）----
+    # 路径：/oes/api/documents/:docId/comments/stream
+    location ~ ^/oes/api/documents/[^/]+/comments/stream$ {
         proxy_pass http://umo_engine;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
     }
 
-    # 引擎静态资源与子路径（/oes/embed/assets/...）
-    location /oes/embed/ {
-        proxy_pass http://umo_engine;
-        proxy_set_header Host $host;
-    }
-
-    # 引擎 API（转换 / 令牌 / 健康检查）
-    location = /oes/api/token {
-        proxy_pass http://umo_engine;
-        proxy_set_header Host $host;
-    }
-    location = /oes/api/health {
-        proxy_pass http://umo_engine;
-        proxy_set_header Host $host;
-    }
-    location /oes/api/convert/ {
-        proxy_pass http://umo_engine;
-        proxy_set_header Host $host;
-    }
-
-    # ---- demo（页面 / 静态资源 / 业务 API）通用 /oes/ 兜底 → demo 容器 ----
+    # ---- 引擎兜底：/oes/ 其余全部（iframe 着陆页 + 静态资源 + 普通 API）----
+    # 包括 /oes/embed、/oes/embed/assets/*、/oes/api/token、/oes/api/convert/*、
+    # /oes/api/documents/:docId/comments（评论 REST，非 SSE）、/oes/api/comments/:id 等。
     location /oes/ {
-        proxy_pass http://umo_demo;
+        proxy_pass http://umo_engine;
         proxy_set_header Host $host;
     }
 }
@@ -114,7 +110,8 @@ server {
 | `map $http_upgrade` | WebSocket 升级映射，协同长连接必须 |
 | `proxy_read_timeout 86400s` | **关键**。nginx 默认 60s 会断开空闲 WS，导致协同断连。必须调大 |
 | `client_max_body_size 20m` | 导出 docx 文件可能较大，适当放宽 |
-| 引擎专属路径放前面 | nginx 最长前缀匹配，`/oes/embed/`、`/oes/collab` 等先于通用 `/oes/` 命中 |
+| demo 路径放前面 | `/oes/demo/` 单独转 demo 容器，`/oes/` 其余兜底转引擎容器 |
+| WS / SSE 单列 | `/oes/collab`（升级头）和评论 SSE 正则（关缓冲）必须单独 location，不能并入兜底 |
 
 ---
 
@@ -179,7 +176,7 @@ window.__UMO_ENGINE_URL__ = '/oes'
 
 ### Q: 如何区分引擎与 demo 的流量？
 
-引擎专属路径（`/oes/embed`、`/oes/embed/`、`/oes/collab`、`/oes/api/convert`、`/oes/api/token`、`/oes/api/health`、`/oes/api/documents/`、`/oes/api/comments/`）单独 location 转给引擎容器，其余 `/oes/` 兜底转给 demo 容器。直接按模板配置即可，无需自己推导前缀。
+按前缀分流：`/oes/demo/` 转 demo 容器，`/oes/` 其余（含 `/oes/embed`、`/oes/collab`、`/oes/api/*`、评论 API 等）兜底转引擎容器。直接按模板配置即可，无需逐条挑路径。
 
 ---
 

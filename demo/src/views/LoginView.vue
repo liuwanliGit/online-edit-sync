@@ -125,6 +125,13 @@ const roleOptions = [
     color: 'linear-gradient(135deg,#4d8cf2,#6aa6ff)',
   },
   {
+    value: 'commenter',
+    label: '评论者',
+    desc: '可查看并评论，不能修改正文',
+    icon: 'chat',
+    color: 'linear-gradient(135deg,#e8a317,#f0c14b)',
+  },
+  {
     value: 'viewer',
     label: '只读者',
     desc: '仅可查看文档，不能修改',

@@ -94,7 +94,7 @@ WORKDIR /app
 
 # ---------- 协同服务（collab-server）----------
 COPY collab-server/package.json collab-server/package-lock.json ./collab-server/
-COPY collab-server/server.js collab-server/storage.js collab-server/comment-storage.js ./collab-server/
+COPY collab-server/server.js collab-server/storage.js collab-server/comment-storage.js collab-server/yjs-position.js ./collab-server/
 
 WORKDIR /app/collab-server
 # 注意：不能用 --ignore-scripts。better-sqlite3 的 install 脚本负责下载与当前 Node ABI

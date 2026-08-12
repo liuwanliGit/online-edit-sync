@@ -24,7 +24,7 @@ Umo Editor Engine 把这些复杂度全部收进一个 Docker 镜像。业务系
 
 ## 架构总览
 
-引擎容器对外统一端口 `9999`，**前端静态资源固定挂 `/oes/embed/` 前缀，API/WS 挂 `/oes/*` 前缀**（与示例 demo 容器的 `/oes/` 前缀错开，单域名外层 nginx 可按最长前缀匹配分流）：
+引擎容器对外统一端口 `9999`，**前端静态资源固定挂 `/oes/embed/` 前缀，API/WS 挂 `/oes/*` 前缀**（与示例 demo 容器的 `/oes/demo/` 前缀错开，单域名外层 nginx 可按最长前缀匹配分流）：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -81,7 +81,7 @@ Umo Editor Engine 把这些复杂度全部收进一个 Docker 镜像。业务系
 
 - 选中文字 → 气泡菜单「评论」→ 左侧面板集中管理（与目录同侧）
 - 评论位置由 Tiptap comment mark 锚定，随 Yjs 协同自动同步
-- 实时更新走 SSE 推送；viewer 只读用户同样可以发表评论
+- 实时更新走 SSE 推送；commenter 用户可以发表评论（mark 由服务端代写）
 - 不想要评论的业务可通过 `comments: { enabled: false }` 关闭
 - 业务系统可通过 REST API 读取评论数据（`/oes/api/documents/:docId/comments`）
 
@@ -99,7 +99,7 @@ Umo Editor Engine 把这些复杂度全部收进一个 Docker 镜像。业务系
 采用 **JWT + API Key 双层鉴权**：
 
 - `UMO_API_KEY`：业务后端持有，用于调引擎 `/oes/api/token` 签发 JWT，**绝不暴露给前端**。留空时引擎进入 dev 无鉴权模式（仅限本地开发，生产必须配置）
-- JWT：短时令牌（默认 24h），放进 iframe URL，包含用户名、文档 id、角色（editor/viewer）
+- JWT：短时令牌（默认 24h），放进 iframe URL，包含用户名、文档 id、角色（editor/commenter/viewer）
 
 ### 高保真导出
 

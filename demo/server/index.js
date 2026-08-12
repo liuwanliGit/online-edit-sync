@@ -173,7 +173,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req)
       const doc = (body.doc || '').toString().trim()
       const name = (body.name || '匿名').toString().trim()
-      const role = body.role === 'viewer' ? 'viewer' : 'editor'
+      const role = ['editor', 'commenter', 'viewer'].includes(body.role) ? body.role : 'editor'
       if (!doc) {
         sendJson(res, 400, { error: '缺少 doc 参数' })
         return
@@ -205,9 +205,9 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { error: '未收到文件' })
         return
       }
-      // 返回相对路径（带应用前缀 /oes）：浏览器基于当前页面地址自动解析，
+      // 返回相对路径（带 demo 应用前缀 /oes/demo）：浏览器基于当前页面地址自动解析，
       // 域名/端口永远正确；若拼绝对 URL，经多层 nginx 透传后 host/前缀容易丢。
-      const fileUrl = `/oes/api/files/${encodeURIComponent(saved.filename)}`
+      const fileUrl = `/oes/demo/api/files/${encodeURIComponent(saved.filename)}`
       console.log(`[receive-doc] 收到文件 ${saved.filename} (${saved.size} bytes)`)
       sendJson(res, 200, { url: fileUrl, filename: saved.filename, size: saved.size })
       return

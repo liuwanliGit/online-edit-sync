@@ -59,7 +59,7 @@ curl -H "x-api-key: <UMO_API_KEY>" \
 | `x-api-key` | header | 生产必填 | `UMO_API_KEY`（引擎环境变量）。**引擎未配置时跳过校验（dev 模式）** |
 | `name` | query | ❌ | 用户名。默认随机生成。用于协同光标显示 |
 | `doc` | query | ❌ | 文档 id。默认 `demo-doc` |
-| `role` | query | ❌ | `editor`（默认）/ `viewer`（只读） |
+| `role` | query | ❌ | `editor`（默认）/ `viewer`（纯只读）/ `commenter`（只读+可评论，服务端代写 mark） |
 
 ### 响应
 
@@ -135,7 +135,7 @@ const provider = new HocuspocusProvider({
 1. 编辑器连接 `/oes/collab`，传 JWT 作为 `token`
 2. 引擎 `onAuthenticate` hook 校验 JWT 签名
 3. 校验 JWT 中的 `doc` claim 与请求的 `documentName` 一致
-4. 若 `role === 'viewer'`，连接设为只读（服务端拒绝其 update）
+4. 若 `role === 'viewer'` 或 `role === 'commenter'`，连接设为只读（服务端拒绝其 update）；commenter 的评论 mark 由服务端经 openDirectConnection 代写
 
 ### 鉴权失败
 
@@ -197,7 +197,7 @@ curl -X POST http://editor-host:9999/oes/api/convert/docx \
 
 ### 鉴权说明
 
-评论 API **无鉴权（同源信任）**：collab-server 的 4000 端口在 Docker 中不对外暴露，评论 API 只能经引擎 nginx 同源反代访问，因此不再叠加额外鉴权。viewer 与 editor 均可读写评论。
+评论 API **无鉴权（同源信任）**：collab-server 的 4000 端口在 Docker 中不对外暴露，评论 API 只能经引擎 nginx 同源反代访问，因此不再叠加额外鉴权。editor / commenter / viewer 均可读写评论。
 
 ### 接口列表
 

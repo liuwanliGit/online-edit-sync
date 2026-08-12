@@ -6,7 +6,8 @@
  *   2. window.__UMO_ENGINE_URL__        —— 旧的全局变量覆盖（兼容）
  *   3. 兜底 http://localhost:9999/oes     —— 本地开发默认值
  *
- * 应用统一挂在 /oes 前缀下，engineUrl 应填带 /oes 前缀的地址：
+ * 引擎侧（embed/协同/评论 API）挂在 /oes 前缀下，engineUrl 应填带 /oes 前缀的地址
+ * （注意：demo 自身挂在 /oes/demo，但 engineUrl 指向引擎，仍用 /oes）：
  *   本地开发：http://localhost:9999/oes
  *   Docker：由 entrypoint 注入（UMO_ENGINE_PUBLIC_URL，默认 http://localhost:9999/oes）
  *   外层 nginx：http://<nginx host>:<port>/oes

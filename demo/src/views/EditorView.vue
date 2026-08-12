@@ -22,15 +22,15 @@
           {{ editorReady ? '编辑器就绪' : '连接中' }}
         </t-tag>
         <t-tag
-          :theme="isViewer() ? 'default' : 'primary'"
+          :theme="isViewer() ? 'default' : isCommenter ? 'warning' : 'primary'"
           variant="light"
           shape="round"
           size="small"
         >
           <template #icon>
-            <t-icon :name="isViewer() ? 'lock-on' : 'edit-2'" />
+            <t-icon :name="isViewer() ? 'lock-on' : isCommenter ? 'chat' : 'edit-2'" />
           </template>
-          {{ isViewer() ? '只读' : '可编辑' }}
+          {{ isViewer() ? '只读' : isCommenter ? '可评论' : '可编辑' }}
         </t-tag>
         <t-button
           theme="default"
@@ -232,7 +232,7 @@ import {
 } from 'tdesign-vue-next'
 
 import { useToast } from '@/composables/useToast'
-import { auth, isViewer } from '@/store/auth'
+import { auth, isViewer, isCommenter, currentRole } from '@/store/auth'
 import { get } from '@/store/documents'
 import { fetchDocToken, getApiBase } from '@/utils/api'
 import { getEmbedUrl, getEngineUrl } from '@/utils/engine-config'
@@ -323,15 +323,15 @@ async function openDoc() {
     doc.value = meta
 
     // 1. 调业务后端代理签 JWT（不直接调引擎 /api/token）
-    const role = isViewer() ? 'viewer' : 'editor'
+    const role = currentRole()
     tokenData.value = await fetchDocToken({
       doc: String(docId),
       name: auth.user?.name || '匿名',
       role,
     })
 
-    // 2. 拼引擎 /embed URL
-    const mode = role === 'viewer' ? 'view' : 'edit'
+    // 2. 拼引擎 /embed URL（viewer→view, commenter→comment, editor→edit）
+    const mode = role === 'viewer' ? 'view' : role === 'commenter' ? 'comment' : 'edit'
     iframeSrc.value = getEmbedUrl(String(docId), tokenData.value.token, mode, 'zh-CN', meta.title || '')
   } catch (e) {
     loadError.value = e.message || String(e)
@@ -341,7 +341,7 @@ async function openDoc() {
 // 重新签 token（演示鉴权对接）
 async function refreshToken() {
   try {
-    const role = isViewer() ? 'viewer' : 'editor'
+    const role = currentRole()
     tokenData.value = await fetchDocToken({
       doc: String(docId),
       name: auth.user?.name || '匿名',

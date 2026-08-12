@@ -18,20 +18,22 @@ import { BubbleMenu } from '@tiptap/vue-3/menus'
 
 const editor = inject('editor')
 const options = inject('options')
-// 评论功能是否启用（viewer 模式下也需要弹出气泡菜单来评论）
-const commentsEnabled = inject('commentsEnabled', ref(false))
+// 是否允许评论（评论功能启用 且 角色非 viewer）。
+// commenter（readOnly）也需要弹出气泡菜单来评论；viewer 不弹。
+const canComment = inject('canComment', ref(false))
 
-// 自定义 shouldShow：让 viewer 模式（readOnly）也能弹出气泡菜单
+// 自定义 shouldShow：让 commenter 模式（readOnly）也能弹出气泡菜单
 // Tiptap BubbleMenu 默认在 !editor.isEditable 时不显示，
-// 当 comments 启用时，viewer 选中文本也弹出（菜单中只有评论按钮可见）
+// 当 canComment 为 true 时，commenter 选中文本也弹出（菜单中只有评论按钮可见）
+// viewer（canComment=false）不弹出
 const shouldShow = ({ editor: ed, state }) => {
   const { selection } = state
   // 空选区不显示
   if (selection.empty) return false
   // 编辑器可编辑时正常显示（原始行为）
   if (ed.isEditable) return true
-  // viewer 模式：评论启用时也显示气泡菜单
-  return commentsEnabled.value
+  // commenter 模式：可评论时显示气泡菜单（仅评论按钮）
+  return canComment.value
 }
 </script>
 

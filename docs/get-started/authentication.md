@@ -39,7 +39,7 @@
 所以鉴权链路必须是：
 
 1. **业务前端**调业务后端（走业务系统原有的登录态鉴权）
-2. **业务后端**校验用户权限，决定角色（editor/viewer）
+2. **业务后端**校验用户权限，决定角色（editor/commenter/viewer）
 3. **业务后端**持 `UMO_API_KEY` 调引擎 `/oes/api/token` 签发 JWT
 4. **业务后端**把 JWT 返回给前端
 5. **业务前端**把 JWT 放进 iframe URL
@@ -54,7 +54,7 @@
 | --- | --- |
 | `name` | 用户名，用于协同光标显示 |
 | `doc` | 文档 id。**必须与 iframe 的 `doc` 参数一致**，引擎会校验 |
-| `role` | `editor`（可编辑）或 `viewer`（只读）。引擎服务端会强制拒绝 viewer 的编辑 |
+| `role` | `editor`（可编辑）/ `commenter`（只读 + 可评论，mark 由服务端代写）/ `viewer`（纯只读）。引擎服务端会强制拒绝 commenter / viewer 的文档内容编辑 |
 | `exp` | 过期时间（由 `JWT_EXPIRES_IN` 控制） |
 
 > 角色由业务后端决定，前端不能篡改（篡改需持 API Key）。
@@ -66,7 +66,7 @@
 核心逻辑：业务后端新增一个接口，给前端用。这个接口：
 
 1. 校验业务系统自己的登录态（原有鉴权逻辑）
-2. 决定用户对该文档的角色（`editor` / `viewer`）—— 业务原有权限逻辑
+2. 决定用户对该文档的角色（`editor` / `commenter` / `viewer`）—— 业务原有权限逻辑
 3. 调引擎 `/oes/api/token` 签发 JWT，返回给前端
 
 ### Node.js 示例
@@ -79,7 +79,7 @@ app.get('/my-doc-token', authMiddleware, async (req, res) => {
   const userName = req.user.name
 
   // 1. 校验用户能否访问该文档（业务原有逻辑）
-  const role = await checkUserPermission(userId, docId)  // 'editor' 或 'viewer'
+  const role = await checkUserPermission(userId, docId)  // 'editor' / 'commenter' / 'viewer'
 
   // 2. 调引擎签 JWT（带上 UMO_API_KEY；注意路径带 /oes 前缀）
   const r = await fetch(
@@ -111,7 +111,7 @@ public class DocTokenController {
             @AuthenticationPrincipal User user) {
 
         // 1. 校验权限，决定角色
-        String role = permissionService.checkRole(user.getId(), doc); // "editor" or "viewer"
+        String role = permissionService.checkRole(user.getId(), doc); // "editor" / "commenter" / "viewer"
 
         // 2. 调引擎签 JWT
         String url = UriComponentsBuilder.fromHttpUrl(engineUrl + "/api/token")
@@ -149,7 +149,7 @@ UMO_API_KEY = "..."  # 从环境变量读
 @router.get("/my-doc-token")
 async def get_token(doc: str, user: User = Depends(get_current_user)):
     # 1. 校验权限，决定角色
-    role = await check_user_permission(user.id, doc)  # "editor" or "viewer"
+    role = await check_user_permission(user.id, doc)  # "editor" / "commenter" / "viewer"
 
     # 2. 调引擎签 JWT
     async with httpx.AsyncClient() as client:

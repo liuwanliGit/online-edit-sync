@@ -6,7 +6,7 @@
 # 启动后：
 #   引擎容器  :9999  → 编辑器引擎（/oes/embed /oes/collab /oes/api/token /oes/api/convert）
 #   demo 容器  :9998  → 瘦客户端示例（登录 / 文档列表 / 编辑器页）
-#   浏览器访问    → http://localhost:9998/oes/
+#   浏览器访问    → http://localhost:9998/oes/demo/
 #
 # 数据卷（持久化）：
 #   umo-collab-data → /app/collab-server/data （引擎：协同文档 Yjs 二进制）
@@ -70,7 +70,7 @@ services:
     healthcheck:
       test:
         - "CMD-SHELL"
-        - "node -e \"fetch('http://127.0.0.1:9998/oes/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
+        - "node -e \"fetch('http://127.0.0.1:9998/oes/demo/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""
       interval: 30s
       timeout: 5s
       retries: 3

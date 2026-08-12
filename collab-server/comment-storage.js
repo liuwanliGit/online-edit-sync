@@ -4,15 +4,22 @@
  * 职责：
  *   1. 评论 CRUD（按文档聚合）
  *   2. SSE 实时推送的客户端注册表与广播
+ *   3. commenter 角色的评论：服务端代写 comment mark 到 Yjs 文档
  *
  * 评论位置由 Tiptap comment mark（data-comment-id）锚定，
  * 不再使用 {from, to} 偏移，文字增删时 mark 随 Yjs 自动同步。
  *
+ * 角色与 mark 写入通道：
+ *   - editor：前端本地 setMark，经自己的协同连接同步（HTTP 只存评论内容）
+ *   - commenter：协同连接为 readOnly，无法自己写 mark。前端提交 Yjs RelativePosition，
+ *     由本层用 server.openDirectConnection 代写到 Yjs 文档并广播给所有端。
+ *     代写前用 selectedText 校验区间文字，不一致则拒绝（文档已变化）。
+ *   - viewer：纯只读，前端不显示评论按钮
+ *
  * 鉴权：无（依赖同源信任——collab-server 4000 端口在 Docker 中不对外暴露，
  *       评论 API 经 nginx 同源反代访问）。
- * viewer 也可评论（后端不限角色）。
  *
- * 挂载方式：由 server.js 调用 createCommentStorage() 得到 { handle, closeCommentDb }，
+ * 挂载方式：由 server.js 调用 createCommentStorage({ server }) 得到 { handle, closeCommentDb }，
  * 在 onRequest 中 `if (await commentStorage.handle(req, res, url)) return`。
  */
 import { randomUUID } from 'crypto'
@@ -20,6 +27,14 @@ import Database from 'better-sqlite3'
 import { mkdirSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
+import * as Y from 'yjs'
+import {
+  resolveRelativePosition,
+  readTextRange,
+  findCommentRanges,
+  setCommentMark,
+  removeCommentMark,
+} from './yjs-position.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -60,7 +75,40 @@ function readJsonBody(req) {
   })
 }
 
-export function createCommentStorage() {
+export function createCommentStorage({ server } = {}) {
+  // ============ 限频：单 docId 每分钟最多 N 次代写（防恶意刷 mark）============
+  const WRITE_RATE_LIMIT = Number(process.env.COMMENT_WRITE_RATE_LIMIT) || 60
+  const writeTimestamps = new Map() // docId -> number[]
+  function checkRateLimit(docId) {
+    const now = Date.now()
+    const arr = (writeTimestamps.get(docId) || []).filter((t) => now - t < 60000)
+    if (arr.length >= WRITE_RATE_LIMIT) return false
+    arr.push(now)
+    writeTimestamps.set(docId, arr)
+    return true
+  }
+
+  // ============ 服务端代写 comment mark（commenter 评论用）============
+  // 在 docId 对应的 Yjs 文档上操作：加/改/删 comment mark，自动广播给所有协同连接
+  // fn 签名：(doc, frag) => result | throws；抛错会回滚事务并返回 { ok:false }
+  const SERVER_WRITE_ORIGIN = 'server-comment-write'
+  async function withDoc(docId, fn) {
+    if (!server?.openDirectConnection) return { ok: false, reason: 'no-server' }
+    const conn = await server.openDirectConnection(docId, {})
+    try {
+      let result
+      await conn.transact((doc) => {
+        const frag = doc.getXmlFragment('default')
+        result = fn(doc, frag)
+      }, SERVER_WRITE_ORIGIN)
+      return result || { ok: true }
+    } catch (e) {
+      return { ok: false, reason: e?.message || String(e) }
+    } finally {
+      await conn.disconnect().catch(() => {})
+    }
+  }
+
   // ============ 独立 comments.db ============
   const COMMENT_DB_PATH =
     process.env.COMMENT_DB_PATH || join(__dirname, 'data', 'comments.db')
@@ -204,15 +252,57 @@ export function createCommentStorage() {
         }
         // id 由客户端生成（与 comment mark 的 commentId 一致），兜底用 uuid
         const id = (body.id || '').toString().trim() || randomUUID()
-        const now = Date.now()
+        const selectedText = (body.selectedText || '').toString().slice(0, 2000)
         const author = normAuthor(body.author)
+
+        // commenter 提交时带 anchor（Yjs RelativePosition 编码），需服务端代写 comment mark
+        // editor 不带 anchor（自己本地 setMark 经协同连接同步），跳过代写
+        const anchor = body.anchor // { fromRel: Uint8Array, toRel: Uint8Array }
+        if (anchor && anchor.fromRel && anchor.toRel) {
+          if (!checkRateLimit(docId)) {
+            sendJson(res, 429, { error: '操作过于频繁，请稍后再试' })
+            return true
+          }
+          // 先存评论内容（即使代写失败，评论记录仍保留，前端可提示"位置失效"）
+          insertStmt.run({
+            id, docId, selectedText, authorJson: JSON.stringify(author),
+            content: content.slice(0, 8000), createdAt: Date.now(),
+          })
+          // 服务端代写：解析相对位置 + selectedText 校验 + format
+          const writeResult = await withDoc(docId, (doc, frag) => {
+            const fromAbs = resolveRelativePosition(doc, new Uint8Array(anchor.fromRel))
+            const toAbs = resolveRelativePosition(doc, new Uint8Array(anchor.toRel))
+            if (!fromAbs || !toAbs || fromAbs.xmlText !== toAbs.xmlText) {
+              throw new Error('评论位置已失效（跨节点或位置不存在）')
+            }
+            const length = toAbs.index - fromAbs.index
+            if (length <= 0) throw new Error('评论区间无效')
+            // selectedText 校验：读当前区间文字，与提交的快照比对
+            const currentText = readTextRange(fromAbs.xmlText, fromAbs.index, toAbs.index)
+            if (currentText !== selectedText) {
+              throw new Error('文档已变化，请重新选中评论')
+            }
+            setCommentMark(fromAbs.xmlText, fromAbs.index, length, {
+              commentId: id, resolved: false,
+            })
+            return { ok: true }
+          })
+          if (!writeResult.ok) {
+            // 代写失败：删除刚存的评论记录，返回 409 让前端重新选中
+            deleteStmt.run(id)
+            console.warn(`[comment] 代写 mark 失败 doc=${docId} id=${id}: ${writeResult.reason}`)
+            sendJson(res, 409, { error: writeResult.reason || '评论位置代写失败' })
+            return true
+          }
+          const comment = rowToComment(getStmt.get(id))
+          sseBroadcast(docId, { type: 'comment:added', payload: comment })
+          sendJson(res, 201, comment)
+          return true
+        }
+        // 无 anchor（editor 路径）：仅存评论内容，mark 由 editor 自己同步
         insertStmt.run({
-          id,
-          docId,
-          selectedText: (body.selectedText || '').toString().slice(0, 2000),
-          authorJson: JSON.stringify(author),
-          content: content.slice(0, 8000),
-          createdAt: now,
+          id, docId, selectedText, authorJson: JSON.stringify(author),
+          content: content.slice(0, 8000), createdAt: Date.now(),
         })
         const comment = rowToComment(getStmt.get(id))
         sseBroadcast(docId, { type: 'comment:added', payload: comment })
@@ -268,22 +358,47 @@ export function createCommentStorage() {
       }
       if (req.method === 'PATCH') {
         const body = await readJsonBody(req)
+        const newResolved =
+          body.resolved !== undefined ? (body.resolved ? 1 : 0) : row.resolved
         patchStmt.run({
           id,
           content:
             body.content !== undefined
               ? String(body.content).slice(0, 8000)
               : row.content,
-          resolved:
-            body.resolved !== undefined ? (body.resolved ? 1 : 0) : row.resolved,
+          resolved: newResolved,
         })
+        // commenter 触发（body.serverWrite=true）：服务端代写 mark 的 resolved 属性
+        // editor 触发时由前端自己改 mark，无需代写
+        if (body.serverWrite && body.resolved !== undefined) {
+          const resolvedBool = !!newResolved
+          await withDoc(row.doc_id, (doc, frag) => {
+            const ranges = findCommentRanges(frag, id)
+            if (!ranges.length) return { ok: true, noMark: true } // mark 已不存在（文字被删等），静默
+            for (const r of ranges) {
+              setCommentMark(r.xmlText, r.relOffset, r.length, { commentId: id, resolved: resolvedBool })
+            }
+            return { ok: true }
+          })
+        }
         const comment = rowToComment(getStmt.get(id))
         sseBroadcast(row.doc_id, { type: 'comment:updated', payload: comment })
         sendJson(res, 200, comment)
         return true
       }
       if (req.method === 'DELETE') {
+        const body = await readJsonBody(req).catch(() => ({}))
         deleteStmt.run(id)
+        // commenter 触发（body.serverWrite=true）：服务端代删 mark
+        if (body.serverWrite) {
+          await withDoc(row.doc_id, (doc, frag) => {
+            const ranges = findCommentRanges(frag, id)
+            for (const r of ranges) {
+              removeCommentMark(r.xmlText, r.relOffset, r.length)
+            }
+            return { ok: true }
+          })
+        }
         sseBroadcast(row.doc_id, { type: 'comment:deleted', payload: { id } })
         sendJson(res, 200, { ok: true })
         return true

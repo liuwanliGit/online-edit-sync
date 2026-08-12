@@ -113,7 +113,7 @@ location /oes/collab {
 
 - 评论数据存引擎自己的 `comments.db`（SQLite），随数据卷持久化
 - 评论位置由 Tiptap comment mark 锚定，随 Yjs 协同自动同步；列表更新走 SSE
-- **viewer 只读用户也可以发表评论**（评论权限不随文档编辑权限走）
+- **commenter 角色用户可以发表评论**（评论 mark 由服务端代写到 Yjs 文档）；viewer 不可评论
 - 不想要评论：`comments: { enabled: false }` 或 `disableExtensions: ['comment']`
 - 业务系统要读取评论数据：`GET /oes/api/documents/:docId/comments`（无鉴权，同源信任）
 
@@ -123,7 +123,7 @@ location /oes/collab {
 
 ### Q10: viewer 角色的只读是前端控制还是服务端强制？
 
-**服务端强制。** JWT role claim 为 `viewer` 时，引擎 `onAuthenticate` hook 会把连接设为只读（`connection.readOnly = true`），Hocuspocus 服务端会**拒绝该连接的所有 update**。即使前端绕过 UI 限制，写入也不会生效。
+**服务端强制。** JWT role claim 为 `viewer` 时，引擎 `onAuthenticate` hook 会把连接设为只读（`connection.readOnly = true`），Hocuspocus 服务端会**拒绝该连接的所有 update**。即使前端绕过 UI 限制，写入也不会生效。commenter 同样为只读连接，但其评论 mark 由服务端经 openDirectConnection 代写到 Yjs 文档
 
 ---
 
@@ -139,7 +139,7 @@ location /oes/collab {
 
 ```js
 // 业务后端
-const role = await checkUserPermission(userId, docId)  // 'editor' 或 'viewer'
+const role = await checkUserPermission(userId, docId)  // 'editor' / 'commenter' / 'viewer'
 const r = await fetch(
   `http://editor-host:9999/oes/api/token?name=${userName}&doc=${docId}&role=${role}`,
   { headers: { 'x-api-key': UMO_API_KEY } }

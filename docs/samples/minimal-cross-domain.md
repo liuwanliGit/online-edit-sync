@@ -28,7 +28,7 @@ app.get('/my-doc-token', authMiddleware, async (req, res) => {
   const userName = req.user.name
 
   // 校验用户权限，决定角色
-  const role = await checkUserPermission(userId, docId)  // 'editor' 或 'viewer'
+  const role = await checkUserPermission(userId, docId)  // 'editor' / 'commenter' / 'viewer'
 
   // 调引擎签 JWT（注意路径带 /oes 前缀）
   const r = await fetch(
@@ -77,7 +77,7 @@ app.post('/api/receive-doc', upload.single('file'), async (req, res) => {
   async function openDoc(docId) {
     // 调业务后端拿 token
     const { token, role } = await fetch(`/my-doc-token?doc=${docId}`).then(r => r.json())
-    const mode = role === 'viewer' ? 'view' : 'edit'
+    const mode = role === 'viewer' ? 'view' : role === 'commenter' ? 'comment' : 'edit'
     // getEmbedUrl 等价写法：ENGINE_URL + '/embed'（引擎着陆页固定为 /oes/embed）
     iframe.src = `${ENGINE_URL}/embed?doc=${docId}&token=${token}&mode=${mode}`
   }

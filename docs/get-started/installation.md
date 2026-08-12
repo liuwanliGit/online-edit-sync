@@ -35,7 +35,7 @@ docker compose -f docker/docker-compose.yml up -d --build
 | `umo-editor-engine` | `9999` | 编辑器引擎（业务系统 iframe 嵌入） |
 | `umo-editor-demo` | `9998` | demo 瘦客户端示例（登录 / 文档列表 / 编辑器页） |
 
-- demo 示例入口：`http://localhost:9998/oes/`（登录后即可体验协同编辑）
+- demo 示例入口：`http://localhost:9998/oes/demo/`（登录后即可体验协同编辑）
 - 引擎入口：`http://localhost:9999/oes/embed?doc=<docId>&token=<jwt>`
 
 > 仅启动已导入的镜像（不重新构建）：`docker compose -f docker/docker-compose-server.yml up -d`

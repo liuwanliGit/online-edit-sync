@@ -104,16 +104,20 @@ export function useComments({ options }) {
   }
 
   // ============ CRUD ============
-  async function addComment({ id, selectedText, content }) {
+  // anchor（commenter 用）：{ fromRel: number[], toRel: number[] } Yjs RelativePosition 编码
+  //   传入则服务端代写 comment mark（commenter 协同连接为 readOnly，无法自己写 mark）
+  async function addComment({ id, selectedText, content, anchor }) {
     const docId = getDocId()
     const author = getAuthor()
+    const body = { id, selectedText, content, author }
+    if (anchor) body.anchor = anchor
     const res = await fetch(
       apiUrl(`/documents/${encodeURIComponent(docId)}/comments`),
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // id 由客户端生成（用于 mark commentId），后端直接用作主键
-        body: JSON.stringify({ id, selectedText, content, author }),
+        body: JSON.stringify(body),
       },
     )
     const data = await res.json().catch(() => ({}))
@@ -124,11 +128,14 @@ export function useComments({ options }) {
     return data
   }
 
-  async function updateComment(id, patch) {
+  // serverWrite（commenter 用）：true 时服务端代写 mark 的属性变更
+  async function updateComment(id, patch, serverWrite = false) {
+    const body = { ...patch }
+    if (serverWrite) body.serverWrite = true
     const res = await fetch(apiUrl(`/comments/${encodeURIComponent(id)}`), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(patch),
+      body: JSON.stringify(body),
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) throw new Error(data.error || '更新评论失败')
@@ -152,17 +159,20 @@ export function useComments({ options }) {
     return data
   }
 
-  async function deleteComment(id) {
+  // serverWrite（commenter 用）：true 时服务端代删 mark
+  async function deleteComment(id, serverWrite = false) {
     const res = await fetch(apiUrl(`/comments/${encodeURIComponent(id)}`), {
       method: 'DELETE',
+      headers: serverWrite ? { 'Content-Type': 'application/json' } : undefined,
+      body: serverWrite ? JSON.stringify({ serverWrite: true }) : undefined,
     })
     if (!res.ok) throw new Error('删除失败')
     comments.value = comments.value.filter((c) => c.id !== id)
     if (activeCommentId.value === id) activeCommentId.value = null
   }
 
-  function resolveComment(id, resolved) {
-    return updateComment(id, { resolved })
+  function resolveComment(id, resolved, serverWrite = false) {
+    return updateComment(id, { resolved }, serverWrite)
   }
 
   function setActive(id) {

@@ -170,8 +170,8 @@
       <menus-bubble-node-delete />
     </template>
     </template>
-    <!-- 评论按钮（editor + viewer 均可，选中文本时显示） -->
-    <template v-if="commentsEnabled">
+    <!-- 评论按钮（editor + commenter 可评论时显示，viewer 隐藏） -->
+    <template v-if="canComment">
       <div class="umo-bubble-menu-divider"></div>
       <button
         class="umo-bubble-menu-comment-btn"
@@ -200,8 +200,8 @@ const { t } = useI18n()
 const editor = inject('editor')
 const options = inject('options')
 
-// 评论功能（引擎内置）
-const commentsEnabled = inject('commentsEnabled', ref(false))
+// 评论功能（引擎内置）：editor + commenter 可评论，viewer 不可
+const canComment = inject('canComment', ref(false))
 const startComment = inject('commentStart', () => {})
 
 // 缓存点击瞬间的选区：mousedown 时浏览器可能折叠 DOM 选区，

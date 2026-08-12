@@ -26,7 +26,7 @@ server {
     listen 443 ssl;
     server_name biz.your-domain.com;
 
-    # 引擎专属路径 → 引擎容器 :9999（整段透传，不剥前缀）
+    # WS 协同需单独升级头（其余走最长前缀匹配的常规反代）
     location /oes/collab {
         proxy_pass http://umo_engine;
         proxy_http_version 1.1;
@@ -35,19 +35,15 @@ server {
         proxy_read_timeout 86400s;
         proxy_send_timeout 86400s;
     }
-    location = /oes/embed {
-        proxy_pass http://umo_engine;
-    }
-    location /oes/embed/ {
-        proxy_pass http://umo_engine;
-    }
-    location /oes/api/ {
-        proxy_pass http://umo_engine;
+
+    # /oes/demo/（页面、静态资源、demo 业务 API）→ demo 容器 :9998
+    location /oes/demo/ {
+        proxy_pass http://umo_demo;
     }
 
-    # 其余 /oes/（页面、静态资源、业务 API）→ demo 容器 :9998
+    # 其余 /oes/（embed、静态资源、引擎 API/WS）→ 引擎容器 :9999（整段透传，不剥前缀）
     location /oes/ {
-        proxy_pass http://umo_demo;
+        proxy_pass http://umo_engine;
     }
 }
 ```
@@ -85,7 +81,7 @@ server {
   // ============ 1. 打开文档（同源，无需指定引擎域名） ============
   async function openDoc(docId) {
     const { token, role } = await fetch(`/my-doc-token?doc=${docId}`).then(r => r.json())
-    const mode = role === 'viewer' ? 'view' : 'edit'
+    const mode = role === 'viewer' ? 'view' : role === 'commenter' ? 'comment' : 'edit'
     // 同源：用相对路径（带 /oes 前缀）
     iframe.src = `/oes/embed?doc=${docId}&token=${token}&mode=${mode}`
   }

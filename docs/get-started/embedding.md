@@ -31,7 +31,7 @@ async function openDocument(docId) {
   const { token, role } = await fetch(`/my-doc-token?doc=${docId}`).then(r => r.json())
 
   // 2. 构造 iframe URL（注意：引擎地址带 /oes 前缀，自动拼 /embed）
-  const mode = role === 'viewer' ? 'view' : 'edit'
+  const mode = role === 'viewer' ? 'view' : role === 'commenter' ? 'comment' : 'edit'
   const editorUrl = `http://editor-host:9999/oes/embed?doc=${docId}&token=${token}&mode=${mode}`
 
   // 3. 嵌入 iframe
@@ -58,7 +58,7 @@ async function openDocument(docId) {
 | --- | :---: | --- | --- |
 | `doc` | ✅ | — | 文档唯一 id（业务系统自己的文档主键）。协同服务端用此作为 Yjs documentName |
 | `token` | ✅ | — | 业务后端签发的 JWT |
-| `mode` | ❌ | `edit` | `edit`（可编辑）/ `view`（只读）。只读模式下引擎服务端强制拒绝编辑 |
+| `mode` | ❌ | `edit` | `edit`（可编辑）/ `view`（只读）/ `comment`（只读但可评论，mark 由服务端代写）。只读模式下引擎服务端强制拒绝编辑 |
 | `lang` | ❌ | `zh-CN` | `zh-CN`（中文）/ `en-US`（英文）。控制编辑器 UI 语言 |
 | `title` | ❌ | — | 文档标题。显示在编辑器内标题位（工具栏左侧、导出文件名），不传则显示「未命名」 |
 

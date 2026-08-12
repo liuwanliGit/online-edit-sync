@@ -100,7 +100,7 @@ const url = getEmbedUrl('doc-123', '<jwt>', 'edit', 'zh-CN', '我的文档')
 ```bash
 cd 仓库根目录
 docker compose -f docker/docker-compose.yml up -d --build
-# 浏览器访问 http://localhost:9998/oes/（登录 → 文档列表 → 打开文档）
+# 浏览器访问 http://localhost:9998/oes/demo/（登录 → 文档列表 → 打开文档）
 ```
 
 demo 容器环境变量（可选）：

@@ -29,7 +29,7 @@
 | [postMessage 协议](./api-reference/postmessage-protocol.md) | 跨域请求/响应消息协议、config 下发与主动推送消息 |
 | [服务端接口](./api-reference/server-api.md) | `/oes/api/token`、`/oes/api/convert`、`/oes/collab`、评论 API、健康检查 |
 | [导出与文件回传](./api-reference/export.md) | 工具栏导出（直接下载）与方案 B3（docx 推送到业务后端） |
-| [nginx 同域反代配置](./api-reference/nginx-reverse-proxy.md) | 单域名子路径部署的分流模板（引擎 /oes/embed* + demo /oes/*） |
+| [nginx 同域反代配置](./api-reference/nginx-reverse-proxy.md) | 单域名子路径部署的分流模板（引擎 /oes/* + demo /oes/demo/*） |
 
 ### Samples（示例）
 

@@ -34,7 +34,9 @@ const UMO_API_KEY = process.env.UMO_API_KEY || ''
 const CORS_ORIGIN = '*'
 
 // ============ 评论存储（独立 comments.db） ============
-const commentStorage = createCommentStorage()
+// 传入 server 单例，供评论 API 在 commenter 提交时代写 comment mark 到 Yjs 文档
+// （commenter 的协同连接为 readOnly，无法自己写 mark；由服务端用 openDirectConnection 代写并广播）
+const commentStorage = createCommentStorage({ server: Server })
 
 // ============ Hocuspocus 服务 ============
 const server = Server
@@ -107,9 +109,12 @@ server.configure({
 
       const name = url.searchParams.get('name') || `用户-${Math.floor(Math.random() * 1000)}`
       const doc = url.searchParams.get('doc') || 'demo-doc'
-      // role 校验：只接受 editor / viewer，默认 editor
+      // role 校验：接受 editor / commenter / viewer，默认 editor
+      // - editor：可编辑文档内容 + 评论
+      // - commenter：不可编辑文档内容，但可评论（评论的 comment mark 由服务端代写到 Yjs 文档）
+      // - viewer：纯只读，不可评论
       const roleParam = url.searchParams.get('role')
-      const role = roleParam === 'viewer' ? 'viewer' : 'editor'
+      const role = ['editor', 'commenter', 'viewer'].includes(roleParam) ? roleParam : 'editor'
       const token = jwt.sign({ name, doc, role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN })
       response.writeHead(200, {
         'Content-Type': 'application/json',
@@ -136,9 +141,13 @@ server.configure({
     if (payload.doc && payload.doc !== documentName) {
       throw { reason: `无权访问文档 "${documentName}"` }
     }
-    // 权限控制：viewer 设为只读（Hocuspocus 会拒绝该连接的所有 update）
+    // 权限控制：viewer 和 commenter 都设为只读（Hocuspocus 会拒绝该连接的所有 update），
+    // 即两者都不能通过协同连接修改文档内容。差异在于：
+    // - viewer：不可评论（前端不显示评论按钮）
+    // - commenter：可评论，评论的 comment mark 由服务端通过评论 API 代写到 Yjs 文档
+    //   （见 comment-storage.js 的 POST/PATCH/DELETE 分支，用 openDirectConnection）
     // editor 默认可编辑。这是服务端强制，前端 setEditable(false) 只是体验优化。
-    if (payload.role === 'viewer') {
+    if (payload.role === 'viewer' || payload.role === 'commenter') {
       connection.readOnly = true
     }
     // 把用户信息写入 context，供后续 hook（onLoadDocument 等）使用

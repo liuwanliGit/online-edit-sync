@@ -73,7 +73,7 @@ docker compose -f docker/docker-compose.yml up -d --build
 | `umo-editor-engine` | `9999` | The editor engine (iframe target) |
 | `umo-editor-demo` | `9998` | Demo thin-client (login / doc list / editor) |
 
-- Demo entry: `http://localhost:9998/oes/` — log in and try co-editing.
+- Demo entry: `http://localhost:9998/oes/demo/` — log in and try co-editing.
 - Engine entry: `http://localhost:9999/oes/embed?doc=<docId>&token=<jwt>`
 
 ### Option 2: Engine only
@@ -133,7 +133,7 @@ Minimal iframe embed:
 | **Content ops** | `getHTML` / `getJSON` / `getText` / `setContent` / `insertContent` / `getImage` / bookmarks … |
 | **Export** | Toolbar one-click Word download (zero config), or `postMessage export` → docx POSTed to your backend callback |
 | **File upload** | base64 Data URL into the Yjs doc — no object storage required |
-| **Permissions** | `mode=view` / `setReadOnly(bool)` enforced server-side; JWT `role` claim (`editor` / `viewer`); viewers can still comment |
+| **Permissions** | `mode=view` / `setReadOnly(bool)` enforced server-side; JWT `role` claim (`editor` / `commenter` / `viewer`); commenter can comment (mark written by server), viewer is read-only |
 | **Bookmarks** | `setBookmark` / `focusBookmark` / `getAllBookmarks` / `deleteBookmark` |
 | **Editor UI** | Ribbon toolbar, page/web layout, zh-CN / en-US, print, fullscreen, theme & skin, templates & @mentions via `config` message |
 
@@ -144,7 +144,7 @@ Minimal iframe embed:
 Two-layer auth keeps secrets off the client:
 
 - **`UMO_API_KEY`** — Held by your backend. Used to call `/oes/api/token` to mint JWTs. **Never expose to the browser.** Empty value = dev no-auth mode (local dev only; **must** be set in production).
-- **JWT** — Short-lived token (default `24h`) placed in the iframe URL. Carries username, document id, and role (`editor` / `viewer`), signed by your backend via the engine.
+- **JWT** — Short-lived token (default `24h`) placed in the iframe URL. Carries username, document id, and role (`editor` / `commenter` / `viewer`), signed by your backend via the engine.
 
 ```bash
 # Generate strong secrets

@@ -37,9 +37,13 @@ const collabEnabled = urlParams.has('collab')
 // 协同文档名：URL 参数 ?doc=xxx 指定，默认 demo-doc
 // 不同 doc 值 = 不同的协同文档，互不干扰
 const collabDoc = urlParams.get('doc') || 'demo-doc'
-// 协同权限：URL 参数 ?role=viewer 指定只读，默认 editor（可编辑）
+// 协同权限：URL 参数 ?role=editor|commenter|viewer 指定角色，默认 editor（可编辑）
+// - editor：可编辑文档内容 + 评论
+// - commenter：不可编辑文档内容，但可评论（评论的 mark 由服务端代写）
+// - viewer：纯只读，不可评论
 // demo 阶段用 URL 参数测试，生产环境应由业务系统鉴权后签发带 role 的 JWT
-const collabRole = urlParams.get('role') === 'viewer' ? 'viewer' : 'editor'
+const roleParam = urlParams.get('role')
+const collabRole = ['editor', 'commenter', 'viewer'].includes(roleParam) ? roleParam : 'editor'
 
 // 每个浏览器标签页作为一个独立的"协作者"，用随机用户名区分光标
 // color 必须是 #RRGGBB 格式（yCursorPlugin 的 defaultSelectionBuilder 会拼 alpha 后缀，
@@ -140,11 +144,11 @@ if (collabEnabled) {
 }
 
 const editorRef = $ref(null)
-// 编辑器创建后：viewer 权限设为只读（前端体验优化，服务端 readOnly 是双保险）
+// 编辑器创建后：viewer/commenter 权限设为只读（前端体验优化，服务端 readOnly 是双保险）
 const onEditorCreated = ({ editor }) => {
-  if (collabEnabled && collabRole === 'viewer') {
+  if (collabEnabled && (collabRole === 'viewer' || collabRole === 'commenter')) {
     editor.setEditable(false)
-    console.log('[collab] 当前为只读用户（viewer），编辑器已禁用编辑')
+    console.log(`[collab] 当前为${collabRole === 'viewer' ? '只读用户（viewer）' : '评论用户（commenter）'}，编辑器已禁用编辑`)
   }
 }
 const remoteMentionUsers = [
@@ -219,6 +223,8 @@ const options = $ref({
     id: 'umoeditor',
     label: 'Umo Editor',
     avatar: 'https://tdesign.gtimg.com/site/avatar.jpg',
+    // 协同角色（供引擎内置评论功能判断 commenter 走服务端代写通道）
+    role: collabRole,
   },
   users: [
     {

@@ -81,9 +81,9 @@ COPY demo/server/config.json demo/server/config.example.json ./
 WORKDIR /app
 
 # ---------- demo 前端静态资源 ----------
-# 放到 /app/public/oes/ 下：URL /oes/assets/x.js 用 root /app/public 自然映射，
+# 放到 /app/public/oes/demo/ 下：URL /oes/demo/assets/x.js 用 root /app/public 自然映射，
 # 无需 nginx alias/rewrite 处理前缀（alias 与 try_files/rewrite 有已知兼容问题）
-COPY --from=demo-frontend-builder /build/demo/dist /app/public/oes
+COPY --from=demo-frontend-builder /build/demo/dist /app/public/oes/demo
 
 # ---------- 配置文件 ----------
 COPY demo/docker/nginx.conf /etc/nginx/nginx.conf

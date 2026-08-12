@@ -212,9 +212,14 @@
                   class="umo-collaborators-panel-role"
                   :class="{
                     'is-viewer': c.user?.role === 'viewer',
+                    'is-commenter': c.user?.role === 'commenter',
                   }"
                   >{{
-                    c.user?.role === 'viewer' ? '只读' : '编辑'
+                    c.user?.role === 'viewer'
+                      ? '只读'
+                      : c.user?.role === 'commenter'
+                        ? '评论'
+                        : '编辑'
                   }}</span
                 >
               </div>

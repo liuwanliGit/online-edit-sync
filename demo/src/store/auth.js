@@ -1,10 +1,11 @@
 import { reactive, watch } from 'vue'
 
 // 当前登录会话：{ name, role }，持久化到 localStorage。
-// role: 'editor'（可编辑）| 'viewer'（只读）
+// role: 'editor'（可编辑）| 'commenter'（可评论，不可编辑）| 'viewer'（纯只读）
 //
 // 瘦客户端说明：编辑器通过 iframe 嵌入引擎 /embed，协同由引擎负责。
-// role 决定向业务后端请求 token 时传的角色（editor/viewer），引擎服务端会强制只读。
+// role 决定向业务后端请求 token 时传的角色（editor/commenter/viewer），
+// 引擎服务端对 commenter/viewer 强制 readOnly，commenter 的评论 mark 由服务端代写。
 const STORAGE_KEY = 'umo-demo:auth'
 
 function load() {
@@ -43,6 +44,15 @@ export function logout() {
 
 export function isViewer() {
   return auth.user?.role === 'viewer'
+}
+
+export function isCommenter() {
+  return auth.user?.role === 'commenter'
+}
+
+// 当前角色（editor / commenter / viewer），默认 editor
+export function currentRole() {
+  return auth.user?.role || 'editor'
 }
 
 export function isLoggedIn() {

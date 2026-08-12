@@ -61,6 +61,8 @@ import {
 } from '@tool-belt/type-predicates'
 import { AllSelection } from '@tiptap/pm/state'
 import { yUndoPluginKey } from '@tiptap/y-tiptap'
+import { absolutePositionToRelativePosition } from 'y-prosemirror'
+import * as Y from 'yjs'
 import domToImage from 'dom-to-image-more'
 import enConfig from 'tdesign-vue-next/esm/locale/en_US'
 import cnConfig from 'tdesign-vue-next/esm/locale/zh_CN'
@@ -178,6 +180,51 @@ const showCommentPanel = ref(false)
 const commentPendingAdd = ref(null) // { commentId, from, to, selectedText }
 const commentAddBusy = ref(false)
 
+// 当前用户协同角色（editor 可本地写 mark；commenter 需服务端代写；viewer 不评论）
+const commentUserRole = computed(
+  () => options.value.user?.role || 'editor',
+)
+const isCommenter = computed(() => commentUserRole.value === 'commenter')
+// 是否允许评论：评论功能开启 且 角色不是 viewer（viewer 纯只读，commenter 和 editor 可评论）
+const canComment = computed(
+  () => commentsEnabled.value && commentUserRole.value !== 'viewer',
+)
+
+// 从 ySyncPlugin 取 binding（用于把 ProseMirror 绝对 position 转 Yjs RelativePosition）
+// 复用协同 UndoManager 修复那段（第 ~536 行）的 plugin key 取法
+function getYSyncBinding() {
+  if (!editor.value) return null
+  try {
+    const { view } = editor.value
+    const { state } = view
+    const ySyncKey = state.plugins.find((p) => p.key === 'y-sync$')
+    return ySyncKey?.getState(state)?.binding || null
+  } catch {
+    return null
+  }
+}
+
+// 把 ProseMirror [from,to] 转 Yjs RelativePosition 编码（commenter 提交评论位置用）
+function buildCommentAnchor(from, to) {
+  const binding = getYSyncBinding()
+  if (!binding?.type || !binding?.mapping) return null
+  try {
+    const fromRel = absolutePositionToRelativePosition(
+      from, binding.type, binding.mapping,
+    )
+    const toRel = absolutePositionToRelativePosition(
+      to, binding.type, binding.mapping,
+    )
+    return {
+      fromRel: Array.from(Y.encodeRelativePosition(fromRel)),
+      toRel: Array.from(Y.encodeRelativePosition(toRel)),
+    }
+  } catch (e) {
+    console.warn('[comments] 构建评论锚点失败', e)
+    return null
+  }
+}
+
 // 评论 composable（docId/author 从 options 取）
 const {
   enabled: commentsEnabled,
@@ -207,25 +254,42 @@ function commentStart({ commentId, from, to, selectedText }) {
   showCommentPanel.value = true
 }
 
-// 提交新评论：先在 editor 上 setMark，再调后端
+// 提交新评论：
+// - editor：本地 setMark（经协同连接同步 mark）+ HTTP 存评论内容
+// - commenter：不本地 setMark（其协同连接 readOnly 发不出 update），
+//              转 Yjs RelativePosition 随 HTTP 提交，由服务端代写 mark 并广播
 async function commentAdd(content) {
   const pending = commentPendingAdd.value
   if (!pending || !editor.value) return
   commentAddBusy.value = true
   try {
     const { commentId, from, to, selectedText } = pending
-    // 在选区上应用 comment mark
-    editor.value
-      .chain()
-      .focus()
-      .setTextSelection({ from, to })
-      .setMark('comment', { commentId })
-      .run()
-    // 发送到后端
-    await commentsAddComment({ id: commentId, selectedText, content })
+    if (isCommenter.value) {
+      // commenter 路径：构建锚点，服务端代写
+      const anchor = buildCommentAnchor(from, to)
+      if (!anchor) {
+        throw new Error('无法定位评论位置（协同未连接）')
+      }
+      await commentsAddComment({ id: commentId, selectedText, content, anchor })
+      // mark 由服务端代写后经协同广播回来，本地 DOM 自动出现（不本地 setMark）
+    } else {
+      // editor 路径：本地 setMark，经协同连接同步
+      editor.value
+        .chain()
+        .focus()
+        .setTextSelection({ from, to })
+        .setMark('comment', { commentId })
+        .run()
+      await commentsAddComment({ id: commentId, selectedText, content })
+    }
     commentPendingAdd.value = null
   } catch (e) {
     console.error('[comments] 添加评论失败', e)
+    // commenter 代写失败（如文档已变化）需提示用户
+    if (isCommenter.value && e?.message) {
+      // TODO: 接入 toast 提示组件；暂用 console + alert
+      window.alert(`评论失败：${e.message}`)
+    }
   } finally {
     commentAddBusy.value = false
   }
@@ -243,40 +307,65 @@ async function commentReply(id, content) {
   }
 }
 
-// 标记解决/取消解决：同时更新 comment mark 的 resolved 属性
+// 标记解决/取消解决：
+// - editor：本地更新 mark 的 resolved 属性 + HTTP 存
+// - commenter：HTTP 带 serverWrite，由服务端代写 mark 的 resolved
 async function commentResolve(id, resolved) {
   try {
-    await commentsResolveComment(id, resolved)
-    updateCommentMark(id, { resolved })
+    if (isCommenter.value) {
+      await commentsResolveComment(id, resolved, true)
+    } else {
+      await commentsResolveComment(id, resolved)
+      updateCommentMark(id, { resolved })
+    }
   } catch (e) {
     console.error('[comments] 更新失败', e)
   }
 }
 
-// 删除评论：同时移除 comment mark
+// 删除评论：
+// - editor：本地移除 mark + HTTP 删
+// - commenter：HTTP 带 serverWrite，由服务端代删 mark
 async function commentDelete(id) {
   try {
-    await commentsDeleteComment(id)
-    removeCommentMark(id)
+    if (isCommenter.value) {
+      await commentsDeleteComment(id, true)
+    } else {
+      await commentsDeleteComment(id)
+      removeCommentMark(id)
+    }
   } catch (e) {
     console.error('[comments] 删除失败', e)
   }
 }
 
 // 聚焦评论：高亮对应文字 + 滚动到位置
+// commenter 场景下，评论刚提交时 mark 可能还在协同广播落地中，
+// 故查不到 DOM 元素时轮询等待（上限 ~1.5s），命中后再滚动。
 function commentFocus(id) {
   commentsSetActive(id)
   // dispatch 空 tr 触发 CommentHighlight decorations 重算
   if (editor.value) {
     editor.value.view.dispatch(editor.value.state.tr)
   }
-  // 滚动到评论 mark 位置
-  nextTick(() => {
-    const el = document.querySelector(
-      `${container} [data-comment-id="${id}"]`,
-    )
-    el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  })
+  // 滚动到评论 mark 位置（带轮询：mark 可能尚未从协同广播落地）
+  const selector = `${container} [data-comment-id="${id}"]`
+  const MAX_WAIT = 1500
+  const INTERVAL = 60
+  let elapsed = 0
+  const tryScroll = () => {
+    const el = document.querySelector(selector)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return
+    }
+    elapsed += INTERVAL
+    if (elapsed < MAX_WAIT) {
+      setTimeout(tryScroll, INTERVAL)
+    }
+    // 超时仍未命中：mark 可能已被删除（原文被删），静默放弃
+  }
+  nextTick(tryScroll)
 }
 
 // 切换评论面板
@@ -329,6 +418,8 @@ function removeCommentMark(commentId) {
 
 // ============ Provide 评论状态 ============
 provide('commentsEnabled', commentsEnabled)
+provide('canComment', canComment)
+provide('isCommenter', isCommenter)
 provide('comments', comments)
 provide('activeCommentId', activeCommentId)
 provide('showCommentPanel', showCommentPanel)

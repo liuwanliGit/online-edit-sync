@@ -73,7 +73,7 @@ docker compose -f docker/docker-compose.yml up -d --build
 | `umo-editor-engine` | `9999` | 编辑器引擎（iframe 嵌入目标） |
 | `umo-editor-demo` | `9998` | demo 瘦客户端（登录 / 文档列表 / 编辑器） |
 
-- demo 入口：`http://localhost:9998/oes/`（登录后即可体验协同编辑）
+- demo 入口：`http://localhost:9998/oes/demo/`（登录后即可体验协同编辑）
 - 引擎入口：`http://localhost:9999/oes/embed?doc=<docId>&token=<jwt>`
 
 ### 方式二：单独启动引擎
@@ -133,7 +133,7 @@ curl http://localhost:9999/oes/api/health
 | **内容操作** | `getHTML` / `getJSON` / `getText` / `setContent` / `insertContent` / `getImage` / 书签 … |
 | **导出** | 工具栏一键导出 Word（零配置），或 `postMessage export` → docx 推送给业务后端 callback |
 | **文件上传** | base64 Data URL 写入 Yjs 文档，无需对象存储 |
-| **只读与权限** | `mode=view` / `setReadOnly(bool)`（服务端强制）；JWT `role`（`editor` / `viewer`）；viewer 仍可评论 |
+| **只读与权限** | `mode=view` / `setReadOnly(bool)`（服务端强制）；JWT `role`（`editor` / `commenter` / `viewer`）；commenter 可评论（mark 由服务端代写），viewer 纯只读 |
 | **书签** | `setBookmark` / `focusBookmark` / `getAllBookmarks` / `deleteBookmark` |
 | **编辑器 UI** | ribbon 工具栏、page/web 布局、zh-CN / en-US、打印、全屏、主题/皮肤、模板与 @提及经 `config` 下发 |
 
@@ -144,7 +144,7 @@ curl http://localhost:9999/oes/api/health
 双层鉴权，密钥不落地到前端：
 
 - **`UMO_API_KEY`** —— 业务后端持有，用于调 `/oes/api/token` 签发 JWT。**绝不暴露给浏览器**。留空为 dev 无鉴权模式（仅限本地开发，**生产必须配置**）。
-- **JWT** —— 短时令牌（默认 `24h`），放进 iframe URL，包含用户名、文档 id、角色（`editor` / `viewer`），由业务后端通过引擎签发。
+- **JWT** —— 短时令牌（默认 `24h`），放进 iframe URL，包含用户名、文档 id、角色（`editor` / `commenter` / `viewer`），由业务后端通过引擎签发。
 
 ```bash
 # 生成强随机密钥

@@ -7,7 +7,7 @@
 ## URL 格式
 
 ```
-GET <engineUrl>/oes/embed?doc=<docId>&token=<jwt>&mode=<edit|view>&lang=<zh-CN|en-US>&title=<文档标题>
+GET <engineUrl>/oes/embed?doc=<docId>&token=<jwt>&mode=<edit|view|comment>&lang=<zh-CN|en-US>&title=<文档标题>
 ```
 
 其中 `<engineUrl>` 是带 `/oes` 前缀的引擎地址，如 `http://editor-host:9999/oes`。
@@ -49,13 +49,15 @@ GET <engineUrl>/oes/embed?doc=<docId>&token=<jwt>&mode=<edit|view>&lang=<zh-CN|e
 编辑模式。
 
 - 类型：`string`
-- 可选值：`edit`（默认）/ `view`
+- 可选值：`edit`（默认）/ `view` / `comment`
 - 含义：
   - `edit`：可编辑
-  - `view`：只读，引擎服务端强制拒绝编辑（即使前端绕过，协同服务端也会拒绝 viewer 的写入）
+  - `view`：只读，引擎服务端强制拒绝编辑（即使前端绕过，协同服务端也会拒绝 viewer 的写入）；不可评论
+  - `comment`：评论模式，文档内容只读（与 `view` 一样的服务端强制），但可评论；评论的 comment mark 由引擎服务端代写到 Yjs 文档并广播（commenter 的协同连接为只读，无法自己写 mark）
 
 ```url
 ?mode=view
+?mode=comment
 ```
 
 ### `lang`（可选）

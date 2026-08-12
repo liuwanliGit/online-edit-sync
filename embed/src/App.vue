@@ -38,11 +38,15 @@ import * as Y from 'yjs'
 import { withBasePath } from './utils/base-path'
 
 // ============ URL 参数契约 ============
-// GET /embed?doc=<docId>&token=<jwt>&mode=<edit|view>&lang=<zh-CN|en-US>&title=<文档标题>
+// GET /embed?doc=<docId>&token=<jwt>&mode=<edit|view|comment>&lang=<zh-CN|en-US>&title=<文档标题>
+//   mode=edit     编辑者（可改文档内容 + 评论）
+//   mode=view     纯只读（不可评论）
+//   mode=comment  评论者（不可改文档内容，但可评论；评论的 comment mark 由服务端代写）
 const urlParams = new URLSearchParams(window.location.search)
 const docId = urlParams.get('doc')
 const token = urlParams.get('token') || ''
-const mode = urlParams.get('mode') === 'view' ? 'view' : 'edit'
+const modeParam = urlParams.get('mode')
+const mode = ['edit', 'view', 'comment'].includes(modeParam) ? modeParam : 'edit'
 const lang = urlParams.get('lang') === 'en-US' ? 'en-US' : 'zh-CN'
 const docTitle = urlParams.get('title') || ''
 
@@ -121,8 +125,9 @@ const editorOptions = computed(() => {
       // 协同模式内容来自 Y.Doc，不要用本地内容覆盖
       content: '',
       title: docTitle,
-      readOnly: mode === 'view',
-      autofocus: mode !== 'view',
+      // view 和 comment 都禁止编辑文档内容（commenter 的评论能力走单独通道）
+      readOnly: mode === 'view' || mode === 'comment',
+      autofocus: mode === 'edit',
       enableMarkdown: true,
       autoSave: { enabled: true, interval: 30000 },
       enableBubbleMenu: true,
@@ -145,11 +150,12 @@ const editorOptions = computed(() => {
     // 协同模式：内容由 Yjs 驱动，禁用 UndoRedo（改用 Yjs 撤销栈），注入协同扩展
     disableExtensions: ['undoRedo'],
     extensions: collabExtensions.value,
-    // 当前用户信息（供引擎内置评论功能作为 author 使用）
+    // 当前用户信息（供引擎内置评论功能作为 author 使用；role 供引擎判断 commenter 走代写通道）
     user: {
       id: collabUserRef.value.id,
       name: collabUserRef.value.name,
       color: collabUserRef.value.color,
+      role: collabUserRef.value.role,
     },
     // 协同模式内容由服务端持久化，点保存给个提示即可
     onSave: async () => '已由服务端实时保存',
@@ -198,7 +204,7 @@ const editorOptions = computed(() => {
 })
 
 function onEditorCreated() {
-  if (mode === 'view') {
+  if (mode === 'view' || mode === 'comment') {
     editorRef.value?.setReadOnly?.(true)
   }
   // 强制设置文档标题：document 状态会被 localStorage 缓存（useStorage），
@@ -228,8 +234,13 @@ async function setupCollab() {
   // 从 JWT 取用户名与角色（业务后端签发时写入 name / role claim）
   const payload = decodeJwtPayload(token)
   const userName = payload.name || `用户-${Math.floor(Math.random() * 1000)}`
-  // role 写进 awareness，供状态栏协作者头像组的角色徽章显示（viewer→只读，否则编辑）
-  const userRole = payload.role === 'viewer' ? 'viewer' : 'editor'
+  // role 写进 awareness，供状态栏协作者头像组的角色徽章显示
+  // （editor→编辑，commenter→评论，viewer→只读）
+  // 优先用 JWT claim 的 role，兜底用 URL mode 推导
+  const roleFromClaim = ['editor', 'commenter', 'viewer'].includes(payload.role)
+    ? payload.role
+    : (mode === 'view' ? 'viewer' : mode === 'comment' ? 'commenter' : 'editor')
+  const userRole = roleFromClaim
   collabUserRef.value = {
     id: payload.id || payload.sub || '',
     name: userName,

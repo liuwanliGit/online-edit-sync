@@ -76,7 +76,7 @@
 
 | 能力 | 说明 |
 | --- | --- |
-| 发起评论 | 选中文字 → 气泡菜单「评论」按钮（editor 与 viewer 均可评论） |
+| 发起评论 | 选中文字 → 气泡菜单「评论」按钮（editor 与 commenter 均可评论，viewer 不可） |
 | 评论面板 | 左侧面板集中管理（与目录同侧上下排列），状态栏有评论入口与数量 badge |
 | 实时同步 | 评论位置由 Tiptap comment mark 锚定，随 Yjs 协同自动同步；列表更新走 SSE 推送 |
 | 回复 / 解决 / 删除 | 完整 CRUD，支持回复、标记已解决、删除（mark 同步从文档移除） |
@@ -84,7 +84,7 @@
 | 业务读取 | REST API 可读评论数据（`/oes/api/documents/:docId/comments`） |
 | 关闭方式 | `comments: { enabled: false }` 或 `disableExtensions: ['comment']` |
 
-> 评论 API **无鉴权（同源信任）**：collab-server 端口不对外暴露，评论 API 经引擎 nginx 同源反代访问。viewer 与 editor 均可读写评论。
+> 评论 API **无鉴权（同源信任）**：collab-server 端口不对外暴露，评论 API 经引擎 nginx 同源反代访问。editor / commenter / viewer 均可读写评论。
 
 详见 [服务端接口 - 评论 API](../api-reference/server-api.md#评论-api)。
 
@@ -107,9 +107,9 @@
 | 能力 | 说明 |
 | --- | --- |
 | 只读模式 | `mode=view` 或 `setReadOnly(true)`。只读由引擎服务端强制，前端无法绕过 |
-| 角色控制 | JWT role claim 决定 editor/viewer，由业务后端签发 |
+| 角色控制 | JWT role claim 决定 editor/commenter/viewer，由业务后端签发 |
 | 运行时切换 | `setReadOnly(bool)` 可在运行时切换编辑/只读 |
-| viewer 评论 | 只读用户仍可发表评论（评论权限不随文档编辑权限走） |
+| commenter 评论 | commenter 角色可发表评论（mark 由服务端代写），viewer 不可评论 |
 
 ---
 
