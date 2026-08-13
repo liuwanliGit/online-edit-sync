@@ -208,8 +208,12 @@ online-edit-sync/
 
 ## 📄 请作者喝杯咖啡
 如果你喜欢这个项目，感觉这个项目对你有帮助，并且能请作者喝杯咖啡的话，作者应该会非常感谢，并加足马力添加新功能。
-![微信收款码](25850059d44479560ab0467c141dd95b.jpg)
-![支付宝收款码](443ea62cac5db41ea6bf49ba925db286.jpg)
+<table>
+  <tr>
+    <td align="center"><img src="25850059d44479560ab0467c141dd95b.jpg" width="220" alt="微信收款码" /><br><sub>微信</sub></td>
+    <td align="center"><img src="443ea62cac5db41ea6bf49ba925db286.jpg" width="220" alt="支付宝收款码" /><br><sub>支付宝</sub></td>
+  </tr>
+</table>
 
 ## 📄 获取帮助
 如果你在使用或部署过程中遇到问题， 欢迎提交 issue。或者添加作者微信：Mr-Liu-cattle，作者会尽快回复你。
