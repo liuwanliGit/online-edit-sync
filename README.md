@@ -210,8 +210,8 @@ If you like this project and feel it has helped you, and you'd like to buy the a
 
 <table>
   <tr>
-    <td align="center"><img src="25850059d44479560ab0467c141dd95b.jpg" width="220" alt="WeChat Pay QR" /><br><sub>WeChat Pay</sub></td>
-    <td align="center"><img src="443ea62cac5db41ea6bf49ba925db286.jpg" width="220" alt="Alipay QR" /><br><sub>Alipay</sub></td>
+    <td align="center"><img src="25850059d44479560ab0467c141dd95b.jpg" width="220" alt="WeChat Pay QR" /><br><sub>Alipay</sub></td>
+    <td align="center"><img src="443ea62cac5db41ea6bf49ba925db286.jpg" width="220" alt="Alipay QR" /><br><sub>WeChat Pay</sub></td>
   </tr>
 </table>
 
