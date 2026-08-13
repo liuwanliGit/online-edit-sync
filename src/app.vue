@@ -225,6 +225,9 @@ const options = $ref({
     avatar: 'https://tdesign.gtimg.com/site/avatar.jpg',
     // 协同角色（供引擎内置评论功能判断 commenter 走服务端代写通道）
     role: collabRole,
+    // 协同模式下把 collabUser 的 name/color 同步到 options.user，
+    // 供引擎内置评论功能作为 author 使用（否则评论 author.name 始终为"匿名"）
+    ...(collabEnabled ? { name: collabUser.name, color: collabUser.color } : {}),
   },
   users: [
     {

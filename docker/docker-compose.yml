@@ -56,6 +56,9 @@ services:
     environment:
       # demo-server → 引擎（容器内通信，用 compose 服务名，带 /oes 应用前缀）
       UMO_ENGINE_URL: http://umo-editor-engine:9999/oes
+      # demo-server → 引擎的转换服务（容器内通信，经引擎 nginx 的 /oes/api/convert/ 反代到 convert-server:4002）
+      # 代码会拼 ${UMO_CONVERT_URL}/api/convert/html，所以这里只到 /oes（拼出 .../oes/api/convert/html）
+      UMO_CONVERT_URL: http://umo-editor-engine:9999/oes
       # 与引擎的 UMO_API_KEY 保持一致（代理签 JWT 时带）
       UMO_API_KEY: ${UMO_API_KEY:-}
       # 浏览器访问引擎的地址（写入前端 config.js，iframe 用，带 /oes 前缀；前端自动拼 /embed）。

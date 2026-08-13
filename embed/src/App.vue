@@ -106,7 +106,11 @@ const COLLAB_COLORS = [
 function decodeJwtPayload(jwt) {
   try {
     const part = jwt.split('.')[1]
-    return JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')))
+    // atob 返回 Latin-1 二进制字符串，需转为 Uint8Array 后用 TextDecoder 按 UTF-8 解码，
+    // 否则 payload 中的中文（如"用户-123"）会被当作 Latin-1 字符 → 乱码。
+    const binary = atob(part.replace(/-/g, '+').replace(/_/g, '/'))
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0))
+    return JSON.parse(new TextDecoder('utf-8').decode(bytes))
   } catch {
     return {}
   }
@@ -299,6 +303,27 @@ async function setupCollab() {
       collaborators.value = list
       // 推送给父页面（纯对象，可被 postMessage 结构化克隆）
       postToParent({ type: 'awareness', collaborators: list })
+    },
+    // 服务端 stateless 消息：collab-server 的 beforeHandleMessage 在文档超限时发来
+    // { type: 'doc-size-limit', size, limit }。收到后转只读 + 断开重连 + 通知父页面。
+    onStateless({ payload }) {
+      try {
+        const msg = JSON.parse(payload)
+        if (msg.type === 'doc-size-limit') {
+          // 1. 编辑器转只读（保留已有内容，防止继续编辑触发更多拒绝）
+          editorRef.value?.setReadOnly?.(true)
+          // 2. 主动断开，阻止 Hocuspocus 反复重连（每次重连都会被服务端拒绝并再发一遍通知）
+          providerRef.value?.disconnect?.()
+          // 3. 通知父页面（demo 前端）显示提示
+          postToParent({
+            type: 'doc-size-limit',
+            size: msg.size,
+            limit: msg.limit,
+          })
+        }
+      } catch {
+        // 非 JSON 格式的 stateless 消息，忽略
+      }
     },
   })
   providerRef.value = provider

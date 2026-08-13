@@ -77,6 +77,11 @@
           allow="clipboard-read; clipboard-write; fullscreen"
           @load="onIframeLoad"
         />
+        <!-- 导入灌入中遮罩（阻止用户编辑，防止与批量 insertContent 冲突） -->
+        <div v-if="importingDoc" class="import-overlay">
+          <t-icon name="loading" class="import-spin" />
+          <span>正在导入文档…</span>
+        </div>
       </div>
 
       <!-- 交互演示面板 -->
@@ -252,6 +257,10 @@ const iframeSrc = ref('')
 const editorReady = ref(false)
 const tokenData = ref(null)
 
+// 导入灌入：route.query.import=1 时从 sessionStorage 取待灌入的 HTML
+const pendingImportHtml = ref('')
+const importingDoc = ref(false)
+
 // 面板：默认折叠，记住用户偏好（localStorage）
 const panelOpen = ref(
   typeof window !== 'undefined' && localStorage.getItem('demo-panel-open') === '1',
@@ -373,6 +382,17 @@ function onMessage(e) {
   // 编辑器就绪通知
   if (data.type === 'ready') {
     editorReady.value = true
+    // 若有待导入的内容，编辑器就绪后灌入
+    if (pendingImportHtml.value) {
+      doImportContent(pendingImportHtml.value)
+    }
+    return
+  }
+
+  // 文档超限通知（embed 从 collab-server 的 stateless 消息转发）
+  if (data.type === 'doc-size-limit') {
+    importingDoc.value = false
+    toast.warning('文档已达大小上限，已转为只读模式')
     return
   }
 
@@ -461,6 +481,74 @@ function sendConfig() {
   postToIframe({ type: 'config', payload: editorConfig })
 }
 
+// ============ 导入灌入（渐进式渲染） ============
+// HTML 体积阈值：≤ 500KB 一次性 setContent；> 500KB 分批 insertContent 避免主线程长时间阻塞
+const IMPORT_SIZE_THRESHOLD = 500 * 1024
+
+// 把 HTML 按顶层块级元素切成块数组（用于分批灌入）
+function splitHtmlIntoBlocks(html) {
+  // 匹配完整的块级元素（<p>...</p>, <h1>...</h1>, <table>...</table>, <ul>...</ul> 等）
+  // self-closing 标签（<img>, <hr>, <br>）归入前一个块或独立成块
+  const blocks = []
+  const regex = /<(?:p|h[1-6]|div|blockquote|pre|table|thead|tbody|tr|ul|ol|li|dl|dt|dd|figure|figcaption|hr|img)\b[^>]*(?:\/>|>[\s\S]*?<\/(?:p|h[1-6]|div|blockquote|pre|table|thead|tbody|tr|ul|ol|li|dl|dt|dd|figure|figcaption)>)/gi
+  let lastIndex = 0
+  let match
+  while ((match = regex.exec(html)) !== null) {
+    // 前面的裸文本也收集
+    if (match.index > lastIndex) {
+      const text = html.slice(lastIndex, match.index).trim()
+      if (text) blocks.push(text)
+    }
+    blocks.push(match[0])
+    lastIndex = regex.lastIndex
+  }
+  // 剩余内容
+  if (lastIndex < html.length) {
+    const rest = html.slice(lastIndex).trim()
+    if (rest) blocks.push(rest)
+  }
+  return blocks.length ? blocks : [html]
+}
+
+// 执行导入灌入：根据 HTML 体积自动选择一次性 or 分批
+function doImportContent(html) {
+  pendingImportHtml.value = ''
+  importingDoc.value = true
+  const size = new Blob([html]).size
+
+  if (size <= IMPORT_SIZE_THRESHOLD) {
+    // 小文档：一次性 setContent
+    postToIframe({ type: 'setContent', content: html })
+    importingDoc.value = false
+    toast.success('文档已导入')
+    return
+  }
+
+  // 大文档：分批灌入
+  const blocks = splitHtmlIntoBlocks(html)
+  // 首屏：前 1000 个块或前 200KB（取小者）
+  const firstBatchCount = Math.min(1000, Math.ceil(blocks.length * (200 * 1024 / size)))
+  const firstBatch = blocks.slice(0, firstBatchCount).join('')
+  postToIframe({ type: 'setContent', content: firstBatch })
+
+  // 后续批次：每帧 500 块
+  let offset = firstBatchCount
+  const BATCH = 500
+  function nextBatch() {
+    if (offset >= blocks.length) {
+      importingDoc.value = false
+      toast.success(`文档已导入（${blocks.length} 个内容块）`)
+      return
+    }
+    const chunk = blocks.slice(offset, offset + BATCH).join('')
+    postToIframe({ type: 'insertContent', content: chunk })
+    offset += BATCH
+    requestAnimationFrame(nextBatch)
+  }
+  // 首屏 setContent 后，下一帧开始追加
+  requestAnimationFrame(nextBatch)
+}
+
 function pmGetContent() {
   busy.value.getContent = true
   error.value.postMessage = ''
@@ -527,6 +615,15 @@ function goBack() {
 // ============ 生命周期 ============
 onMounted(() => {
   window.addEventListener('message', onMessage)
+  // 检测导入场景：从 sessionStorage 取待灌入的 HTML，等 iframe ready 后灌入
+  if (route.query.import === '1') {
+    const stored = sessionStorage.getItem(`import-content-${docId}`)
+    if (stored) {
+      pendingImportHtml.value = stored
+      // 用完即删（无论灌入成功与否，避免刷新重复灌入）
+      sessionStorage.removeItem(`import-content-${docId}`)
+    }
+  }
   openDoc()
 })
 
@@ -590,6 +687,7 @@ onUnmounted(() => {
 
 /* iframe 区 */
 .iframe-wrap {
+  position: relative;
   flex: 1;
   min-width: 0;
   background: #fff;
@@ -599,6 +697,26 @@ onUnmounted(() => {
   height: 100%;
   border: none;
   display: block;
+}
+/* 导入灌入中遮罩 */
+.import-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(2px);
+  color: var(--demo-text-secondary);
+  font-size: 14px;
+  z-index: 10;
+  pointer-events: all;
+}
+.import-spin {
+  font-size: 20px;
+  color: var(--demo-primary);
+  animation: demo-spin 1s linear infinite;
 }
 
 /* ===== 交互面板 ===== */

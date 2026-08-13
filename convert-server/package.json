@@ -3,12 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Umo Editor 文档转换服务：把编辑器 HTML 内容转成 .docx。独立于 demo-server 与 collab-server，专注格式转换，不接触文档元数据与协同内容。",
+  "description": "Umo Editor 文档转换服务：双向格式转换。HTML→.docx（编辑器导出）、.docx/.txt→HTML（文档导入）。独立于 demo-server 与 collab-server，专注格式转换，不接触文档元数据与协同内容。",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js"
   },
   "dependencies": {
-    "html-to-docx": "1.8.0"
+    "busboy": "1.6.0",
+    "html-to-docx": "1.8.0",
+    "mammoth": "1.8.0"
   }
 }

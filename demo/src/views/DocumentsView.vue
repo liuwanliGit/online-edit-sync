@@ -35,10 +35,23 @@
           <h1 class="page-title">我的文档</h1>
           <p class="page-sub">共 {{ docs.length }} 篇文档 · {{ isViewer() ? '当前为只读模式' : '点击卡片开始编辑' }}</p>
         </div>
-        <t-button v-if="!isViewer()" theme="primary" @click="openCreate">
-          <template #icon><t-icon name="add" /></template>
-          新建文档
-        </t-button>
+        <div v-if="!isViewer()" class="content-actions">
+          <t-button theme="primary" @click="openCreate">
+            <template #icon><t-icon name="add" /></template>
+            新建文档
+          </t-button>
+          <t-button theme="default" variant="outline" :loading="importing" @click="triggerUpload">
+            <template #icon><t-icon name="upload" /></template>
+            上传文档
+          </t-button>
+          <input
+            ref="fileInputRef"
+            type="file"
+            accept=".txt,.docx"
+            class="hidden-file-input"
+            @change="onFileSelected"
+          />
+        </div>
       </div>
 
       <!-- 卡片网格 -->
@@ -56,7 +69,7 @@
               <t-icon name="file" class="card-file-icon" />
             </div>
             <p class="card-summary">
-              点击打开，通过 iframe 嵌入引擎编辑
+              {{ doc.excerpt || '（暂无内容，点击打开开始编辑）' }}
             </p>
             <div class="card-meta">
               <span class="meta-author">
@@ -171,7 +184,7 @@ import {
 
 import { useToast } from '@/composables/useToast'
 import { auth, isViewer, logout } from '@/store/auth'
-import { list, create, remove, relativeTime } from '@/store/documents'
+import { list, create, remove, upload, relativeTime, MAX_IMPORT_SIZE } from '@/store/documents'
 
 const router = useRouter()
 const toast = useToast()
@@ -222,6 +235,40 @@ async function doCreate() {
 
 function openDoc(doc) {
   router.push({ name: 'editor', params: { id: doc.id } })
+}
+
+// 上传文档导入
+const fileInputRef = ref(null)
+const importing = ref(false)
+
+function triggerUpload() {
+  fileInputRef.value?.click()
+}
+
+async function onFileSelected(e) {
+  const file = e.target.files?.[0]
+  // 重置 input，使同一文件可再次选择
+  e.target.value = ''
+  if (!file) return
+
+  // 前端预校验体积
+  if (file.size > MAX_IMPORT_SIZE) {
+    toast.error(`文件超过 2MB 限制（当前 ${(file.size / 1024 / 1024).toFixed(1)}MB）`)
+    return
+  }
+
+  importing.value = true
+  try {
+    const result = await upload(file)
+    // 把转换后的 HTML 暂存 sessionStorage（避免超大 URL）
+    sessionStorage.setItem(`import-content-${result.id}`, result.html)
+    toast.success('文档已导入，正在打开…')
+    router.push({ name: 'editor', params: { id: result.id }, query: { import: '1' } })
+  } catch (err) {
+    toast.error('导入失败：' + (err.message || '未知错误'))
+  } finally {
+    importing.value = false
+  }
 }
 
 // 删除
@@ -327,6 +374,13 @@ function onLogout() {
   align-items: flex-end;
   justify-content: space-between;
   margin-bottom: 28px;
+}
+.content-actions {
+  display: flex;
+  gap: 12px;
+}
+.hidden-file-input {
+  display: none;
 }
 .page-title {
   margin: 0;

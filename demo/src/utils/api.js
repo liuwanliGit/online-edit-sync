@@ -83,6 +83,24 @@ export async function deleteDocument(id) {
 }
 
 /**
+ * 上传文档导入（.txt/.docx → 创建新文档 + 转换为 HTML）
+ * 走 multipart/form-data，不经过通用的 JSON request()。
+ * @param {File} file 用户选择的文件
+ * @returns {Promise<{id, title, html}>}
+ */
+export async function importDocument(file) {
+  const url = `${getApiBase()}/api/import`
+  const form = new FormData()
+  form.append('file', file)
+  const res = await fetch(url, { method: 'POST', body: form })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    throw new Error(data.error || `导入失败 (${res.status})`)
+  }
+  return data
+}
+
+/**
  * 代理签 JWT：调 demo 后端 /api/doc-token
  * 业务后端持 UMO_API_KEY 调引擎 /api/token，前端只拿到短时 JWT。
  * @returns {Promise<{token, doc, role, name}>}
@@ -102,5 +120,7 @@ function toCamel(d) {
     createdBy: d.created_by,
     createdAt: d.created_at,
     updatedAt: d.updated_at,
+    // 摘要（协同服务从 Yjs 文档提取的首段纯文本），缺失/为空均正常（文档尚未编辑）
+    excerpt: typeof d.excerpt === 'string' ? d.excerpt : '',
   }
 }

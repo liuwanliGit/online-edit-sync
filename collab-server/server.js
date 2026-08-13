@@ -14,6 +14,7 @@
 
 import { Server } from '@hocuspocus/server'
 import jwt from 'jsonwebtoken'
+import * as Y from 'yjs'
 import { applyUpdate, encodeStateAsUpdate } from 'yjs'
 
 import { closeDb, loadDoc, saveDoc } from './storage.js'
@@ -32,11 +33,54 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h'
 // 未设置时仅打印警告并放行（仅用于本地 dev，生产镜像必须配置）。
 const UMO_API_KEY = process.env.UMO_API_KEY || ''
 const CORS_ORIGIN = '*'
+// 文档 Yjs binary 体积上限（字节）。超过后拒绝新的编辑 update，防止文档膨胀到无法打开。
+// 基于打开体验倒推：3MB → 每次打开 WS 同步约 2.5 秒 + DOM 渲染约 1.5 秒，是可接受的体验边界。
+// 设为 0 则不限制。
+const MAX_DOC_SIZE = Number(process.env.MAX_DOC_SIZE_BYTES) || 3 * 1024 * 1024
 
 // ============ 评论存储（独立 comments.db） ============
 // 传入 server 单例，供评论 API 在 commenter 提交时代写 comment mark 到 Yjs 文档
 // （commenter 的协同连接为 readOnly，无法自己写 mark；由服务端用 openDirectConnection 代写并广播）
 const commentStorage = createCommentStorage({ server: Server })
+
+// ============ 文档摘要提取（列表卡片用）============
+// 从 SQLite 加载 Yjs 二进制 → 临时 Y.Doc → 遍历 XmlFragment 拼接前 N 字纯文本。
+// 不走 openDirectConnection，避免把文档载入 Hocuspocus 内存（仅读摘要不应触发协同生命周期）。
+// SQLite 内容由 onStoreDocument 防抖写入（Hocuspocus 2s），最多滞后 2s，列表展示可接受。
+const EXCERPT_MAX_CHARS = 80
+function readExcerpt(docName, max = EXCERPT_MAX_CHARS) {
+  const buf = loadDoc(docName)
+  if (!buf) return ''
+  const tmpDoc = new Y.Doc()
+  try {
+    applyUpdate(tmpDoc, new Uint8Array(buf))
+    const frag = tmpDoc.getXmlFragment('default')
+    let text = ''
+    walkFragmentText(frag, (s) => {
+      const remaining = max * 2 - text.length // 多收一倍防 trim 后不足
+      if (remaining > 0) text += s.slice(0, Math.max(0, remaining))
+    })
+    text = text.replace(/\s+/g, ' ').trim()
+    if (!text) return ''
+    return text.length > max ? text.slice(0, max) + '…' : text
+  } catch {
+    return ''
+  } finally {
+    tmpDoc.destroy()
+  }
+}
+
+// 遍历 XmlFragment/XmlElement 下的所有 XmlText，把纯文本按顺序喂给 cb
+function walkFragmentText(node, cb) {
+  if (node instanceof Y.XmlText) {
+    for (const op of node.toDelta()) {
+      if (op.insert) cb(op.insert)
+    }
+    return
+  }
+  const children = node.toArray ? node.toArray() : []
+  for (const child of children) walkFragmentText(child, cb)
+}
 
 // ============ Hocuspocus 服务 ============
 const server = Server
@@ -68,6 +112,21 @@ server.configure({
       }
     }
 
+    // ============ 文档摘要（用于业务后端列表卡片展示）============
+    // GET /api/documents/:docName/excerpt → { excerpt: "前N字..." }
+    // 无鉴权（同源信任，与评论 API 一致；返回内容仅为文档首段纯文本，不含敏感数据）
+    const excerptMatch = pathname.match(/^\/api\/documents\/([^/]+)\/excerpt$/)
+    if (excerptMatch && request.method === 'GET') {
+      const docName = decodeURIComponent(excerptMatch[1])
+      const excerpt = readExcerpt(docName)
+      response.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Access-Control-Allow-Origin': CORS_ORIGIN,
+      })
+      response.end(JSON.stringify({ excerpt }))
+      throw null
+    }
+
     // CORS 预检：业务后端可能跨域调 /api/token
     if (request.method === 'OPTIONS' && pathname === '/api/token') {
       response.writeHead(204, {
@@ -83,7 +142,7 @@ server.configure({
     // 健康检查
     if (pathname === '/api/health' && request.method === 'GET') {
       response.writeHead(200, {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
         'Access-Control-Allow-Origin': CORS_ORIGIN,
       })
       response.end(JSON.stringify({ ok: true, service: 'umo-collab-server' }))
@@ -96,7 +155,7 @@ server.configure({
         const apiKey = request.headers['x-api-key']
         if (!apiKey || apiKey !== UMO_API_KEY) {
           response.writeHead(401, {
-            'Content-Type': 'application/json',
+            'Content-Type': 'application/json; charset=utf-8',
             'Access-Control-Allow-Origin': CORS_ORIGIN,
           })
           response.end(JSON.stringify({ error: 'API Key 无效或缺失' }))
@@ -117,7 +176,7 @@ server.configure({
       const role = ['editor', 'commenter', 'viewer'].includes(roleParam) ? roleParam : 'editor'
       const token = jwt.sign({ name, doc, role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN })
       response.writeHead(200, {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
         'Access-Control-Allow-Origin': CORS_ORIGIN,
       })
       response.end(JSON.stringify({ token, name, doc, role }))
@@ -154,6 +213,34 @@ server.configure({
     context.user = { name: payload.name, doc: payload.doc, role: payload.role || 'editor' }
   },
 
+  // 文档大小限制：在每条 update 应用前检查当前文档体积。
+  // 超过 MAX_DOC_SIZE 时：
+  //   1. 用 stateless 消息通知前端「文档超限，转只读」（前端 onStateless 接收）
+  //   2. throw 拒绝该 update（Hocuspocus 会关闭连接）
+  // 注意：这是"防止继续膨胀"的硬限制，不能缩小已有文档——已有内容保留，只是不能再编辑。
+  async beforeHandleMessage({ document, documentName, connection }) {
+    if (MAX_DOC_SIZE <= 0) return
+    const size = encodeStateAsUpdate(document).length
+    if (size > MAX_DOC_SIZE) {
+      console.log(
+        `[size-limit] 文档 "${documentName}" 超限: ${size} > ${MAX_DOC_SIZE} bytes，拒绝 update`,
+      )
+      // 先通过 stateless 消息通知前端（带外通道，不依赖 WS close code 传递）
+      connection?.sendStateless?.(
+        JSON.stringify({
+          type: 'doc-size-limit',
+          size,
+          limit: MAX_DOC_SIZE,
+        }),
+      )
+      // 再 throw 拒绝 update + 关闭连接
+      throw {
+        code: 4030,
+        reason: `文档已达大小上限(${Math.round(MAX_DOC_SIZE / 1024 / 1024)}MB)，已转为只读模式`,
+      }
+    }
+  },
+
   // 文档加载：从 SQLite 取回二进制状态，喂给 Hocuspocus 提供的 document
   async onLoadDocument({ documentName, document }) {
     const saved = loadDoc(documentName)
@@ -188,6 +275,7 @@ server.configure({
     console.log(`   鉴权方式: JWT (HS256)，签发端点 GET /api/token`)
     console.log(`   API Key 收口: ${UMO_API_KEY ? '已启用（业务后端须带 x-api-key）' : '未启用（dev 模式，/api/token 无鉴权）'}`)
     console.log(`   持久化方式: SQLite（WAL 模式）`)
+    console.log(`   文档大小限制: ${MAX_DOC_SIZE > 0 ? Math.round(MAX_DOC_SIZE / 1024 / 1024) + 'MB（超限转只读）' : '未限制'}`)
     console.log(`   评论 API: /api/documents/:docId/comments/*（无鉴权，同源信任）`)
     console.log(`   评论 SSE: /api/documents/:docId/comments/stream\n`)
   },

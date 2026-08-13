@@ -1,4 +1,10 @@
-import { fetchDocuments, fetchDocument, createDocument, deleteDocument } from '@/utils/api'
+import {
+  fetchDocuments,
+  fetchDocument,
+  createDocument,
+  deleteDocument,
+  importDocument,
+} from '@/utils/api'
 
 // 文档存储（瘦客户端：全部走业务后端 REST）
 // 文档对象统一形状：{ id, title, createdAt, updatedAt, createdBy }
@@ -30,6 +36,18 @@ export function get(id) {
  */
 export function create(title, createdBy) {
   return createDocument({ title, createdBy }).then((d) => d.id)
+}
+
+// 导入文件体积上限（与后端 /api/import 的限制一致）
+export const MAX_IMPORT_SIZE = 2 * 1024 * 1024
+
+/**
+ * 上传文档导入
+ * @param {File} file 用户选择的文件
+ * @returns {Promise<{id, title, html}>}
+ */
+export function upload(file) {
+  return importDocument(file)
 }
 
 /**

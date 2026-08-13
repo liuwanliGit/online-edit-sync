@@ -35,10 +35,20 @@ const DB_PATH = process.env.DB_PATH || join(__dirname, 'data', 'docs.db')
 const FILES_DIR = join(__dirname, 'data', 'files')
 // 引擎地址（本服务代理调引擎 /api/token 时用）
 const UMO_ENGINE_URL = (process.env.UMO_ENGINE_URL || configFile.engineUrl || 'http://localhost:9999').replace(/\/+$/, '')
+// 协同服务地址（本服务拉取文档摘要时调 /api/documents/:name/excerpt）。
+// 多数部署中与引擎地址同源（引擎 nginx 把 /oes/collab /oes/api/documents 反代到 collab-server:4000），
+// 也可独立部署。默认与引擎同源。
+const UMO_COLLAB_URL = (process.env.UMO_COLLAB_URL || configFile.collabUrl || UMO_ENGINE_URL).replace(/\/+$/, '')
 // 引擎 API Key（与引擎启动时的 UMO_API_KEY 一致；引擎 dev 模式可留空）
 const UMO_API_KEY = process.env.UMO_API_KEY || configFile.apiKey || ''
 // 接收回传文件的鉴权 key（防止伪造；前端在 export 请求里通过 apiKey 透传）
 const RECEIVE_KEY = process.env.BIZ_RECEIVE_KEY || configFile.receiveKey || ''
+// 拉取摘要超时（毫秒）。协同服务不可用时也不应拖慢列表响应。
+const EXCERPT_TIMEOUT_MS = Number(process.env.EXCERPT_TIMEOUT_MS || configFile.excerptTimeoutMs || 1500)
+// 格式转换服务地址（导入/导出文档）。导入时把文件转发到 <convertUrl>/api/convert/html
+const UMO_CONVERT_URL = (process.env.UMO_CONVERT_URL || configFile.convertUrl || 'http://localhost:4002').replace(/\/+$/, '')
+// 导入文件体积上限（与 convert-server 的 MAX_IMPORT_SIZE 保持一致）
+const MAX_IMPORT_SIZE = 2 * 1024 * 1024
 
 // ============ 数据库 ============
 mkdirSync(dirname(DB_PATH), { recursive: true })
@@ -78,6 +88,25 @@ const JSON_HEADERS = {
 function sendJson(res, status, data) {
   res.writeHead(status, JSON_HEADERS)
   res.end(JSON.stringify(data))
+}
+
+// 拉取单个文档的纯文本摘要（来自协同服务 /api/documents/:id/excerpt）
+// 失败/超时返回空字符串——列表展示允许空摘要，不应阻塞整体响应
+async function fetchExcerpt(docId) {
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), EXCERPT_TIMEOUT_MS)
+    const res = await fetch(
+      `${UMO_COLLAB_URL}/api/documents/${encodeURIComponent(docId)}/excerpt`,
+      { signal: controller.signal },
+    )
+    clearTimeout(timer)
+    if (!res.ok) return ''
+    const data = await res.json().catch(() => ({}))
+    return typeof data.excerpt === 'string' ? data.excerpt : ''
+  } catch {
+    return ''
+  }
 }
 
 // 读 JSON request body（限 64KB，元数据/鉴权接口用不到那么大）
@@ -120,10 +149,16 @@ const server = http.createServer(async (req, res) => {
     // 评论相关路由（REST + SSE）优先交由 commentStore 处理
     if (await commentStore.handle(req, res, url)) return
 
-    // GET /api/documents —— 文档列表
+    // GET /api/documents —— 文档列表（含摘要：并发调协同端 /excerpt 拉首段纯文本）
     if (pathname === '/api/documents' && req.method === 'GET') {
       const rows = listStmt.all()
-      sendJson(res, 200, { documents: rows })
+      const docs = await Promise.all(
+        rows.map(async (row) => ({
+          ...row,
+          excerpt: await fetchExcerpt(row.id),
+        })),
+      )
+      sendJson(res, 200, { documents: docs })
       return
     }
 
@@ -189,6 +224,72 @@ const server = http.createServer(async (req, res) => {
       }
       console.log(`[doc-token] 代理签发 JWT: doc="${doc}" name="${name}" role="${role}"`)
       sendJson(res, 200, { token: data.token, doc, role, name })
+      return
+    }
+
+    // POST /api/import (multipart/form-data, field: file) —— 上传文档导入
+    // 收到 .txt/.docx → 转发到 convert-server /api/convert/html → 拿到 HTML → 创建文档元数据
+    // HTML 不落库（架构边界：经编辑器 setContent 灌入后由协同层持久化）
+    if (pathname === '/api/import' && req.method === 'POST') {
+      const file = await readMultipartFileToBuffer(req)
+      if (!file) {
+        sendJson(res, 400, { error: '未收到文件' })
+        return
+      }
+      // 扩展名 + MIME 双重校验
+      const ext = extname(file.filename).toLowerCase()
+      const mime = (file.mimeType || '').toLowerCase()
+      const isTxt = ext === '.txt' || mime === 'text/plain'
+      const isDocx =
+        ext === '.docx' ||
+        mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      if (!isTxt && !isDocx) {
+        sendJson(res, 400, {
+          error: `不支持的文件类型: ${ext || mime || '未知'}，仅支持 .txt 和 .docx`,
+        })
+        return
+      }
+
+      // 转发到 convert-server（重新打包 multipart）
+      const boundary = `----DemoImport${Date.now()}`
+      const parts = Buffer.concat([
+        Buffer.from(`--${boundary}\r\n`),
+        Buffer.from(
+          `Content-Disposition: form-data; name="file"; filename="${file.filename}"\r\n`,
+        ),
+        Buffer.from(`Content-Type: ${file.mimeType || 'application/octet-stream'}\r\n\r\n`),
+        file.buffer,
+        Buffer.from(`\r\n--${boundary}--\r\n`),
+      ])
+      const convertRes = await fetch(`${UMO_CONVERT_URL}/api/convert/html`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': parts.length,
+        },
+        body: parts,
+      })
+      const convertData = await convertRes.json().catch(() => ({}))
+      if (!convertRes.ok) {
+        sendJson(res, convertRes.status, {
+          error: convertData.error || '转换服务处理失败',
+        })
+        return
+      }
+
+      // 创建文档元数据（title 用文件名去扩展名）
+      const title = (convertData.title || '导入文档').toString().trim()
+      const createdBy = '导入' // 导入场景无当前用户上下文，标记来源
+      const now = Date.now()
+      const id = uuidv4()
+      insertStmt.run({ id, title, createdBy, createdAt: now, updatedAt: now })
+      console.log(`[import] 文档 "${title}" (${id}), HTML ${convertData.html?.length || 0} chars`)
+
+      sendJson(res, 201, {
+        id,
+        title,
+        html: convertData.html || '',
+      })
       return
     }
 
@@ -296,10 +397,63 @@ function saveMultipartFile(req, contentType) {
   })
 }
 
+// ============ multipart 文件解析（读入内存 buffer，用于导入转发） ============
+// 与 saveMultipartFile 不同：不写盘，直接收集到内存 buffer（转发给 convert-server 后即弃）
+function readMultipartFileToBuffer(req) {
+  return new Promise((resolve, reject) => {
+    const contentType = req.headers['content-type'] || ''
+    if (!contentType.includes('multipart/form-data')) {
+      resolve(null)
+      return
+    }
+    const bb = busboy({
+      headers: req.headers,
+      limits: { fileSize: MAX_IMPORT_SIZE },
+      defParamCharset: 'utf8',
+    })
+    let result = null
+    bb.on('file', (fieldname, stream, info) => {
+      const chunks = []
+      let size = 0
+      let tooLarge = false
+      stream.on('data', (chunk) => {
+        size += chunk.length
+        if (size > MAX_IMPORT_SIZE) {
+          tooLarge = true
+          reject(new Error('文件超过 2MB 限制'))
+          stream.destroy()
+          return
+        }
+        chunks.push(chunk)
+      })
+      stream.on('end', () => {
+        if (!tooLarge) {
+          result = {
+            buffer: Buffer.concat(chunks),
+            filename: info.filename || '',
+            mimeType: info.mimeType || '',
+          }
+        }
+      })
+      stream.on('error', reject)
+    })
+    bb.on('finish', () => {
+      if (!result) {
+        reject(new Error('未收到文件'))
+        return
+      }
+      resolve(result)
+    })
+    bb.on('error', reject)
+    req.pipe(bb)
+  })
+}
+
 server.listen(PORT, () => {
   console.log(`\n✅ 瘦客户端示例后端已启动: http://localhost:${PORT}`)
   console.log(`   文档元数据: GET/POST /api/documents, DELETE /api/documents/:id`)
   console.log(`   代理签 JWT: POST /api/doc-token（→ 引擎 ${UMO_ENGINE_URL}/api/token）`)
+  console.log(`   文档导入: POST /api/import（→ 转换服务 ${UMO_CONVERT_URL}/api/convert/html）`)
   console.log(`   接收回传: POST /api/receive-doc（方案 B3）`)
   console.log(`   存储: ${DB_PATH} (SQLite) + ${FILES_DIR} (回传文件)\n`)
 })
