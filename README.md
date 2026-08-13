@@ -204,6 +204,19 @@ Full documentation lives under [`docs/`](./docs) (in Chinese). Key entry points:
 
 ---
 
+## ☕ Buy the Author a Coffee
+
+If you like this project and feel it has helped you, and you'd like to buy the author a coffee, it would be greatly appreciated — and will fuel more new features.
+
+![WeChat Pay QR](25850059d44479560ab0467c141dd95b.jpg)
+![Alipay QR](443ea62cac5db41ea6bf49ba925db286.jpg)
+
+## 💬 Get Help
+
+If you run into any issues while using or deploying the project, feel free to [open an issue](../../issues). You can also add the author on WeChat: **Mr-Liu-cattle**, and the author will get back to you as soon as possible.
+
+---
+
 ## 📄 License
 
 [MIT](./LICENSE)
