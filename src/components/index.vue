@@ -1268,12 +1268,46 @@ const getVanillaHTML = async () => {
   })
   replaceIcons(codeBlockNodes, '16px')
 
-  // 图表处理
+  // 图表处理：把 echarts 活实例替换为 base64 图片快照
+  // canvas 内容无法随 HTML 序列化，下游 html-to-docx 也不识别自定义 <echarts> 标签，
+  // 不做快照时导出的 docx 中图表会整体丢失。实例挂在原始 DOM（非克隆）上，
+  // 两边 querySelectorAll 顺序一致，按索引一一对应取实例。
   const chartNodes = pageNode.querySelectorAll('.umo-node-echarts')
-  chartNodes.forEach((el) => {
+  const liveChartNodes = document.querySelectorAll(
+    `${container} .umo-page-content .umo-node-echarts`,
+  )
+  chartNodes.forEach((el, index) => {
     const chartNode = el.querySelector('.umo-node-echarts-body')
-    if (chartNode) {
-      chartNode.removeAttribute('_echarts_instance_')
+    if (!chartNode) {
+      return
+    }
+    let chart = null
+    try {
+      const liveBody = liveChartNodes[index]?.querySelector(
+        '.umo-node-echarts-body',
+      )
+      chart =
+        liveBody && window.echarts
+          ? window.echarts.getInstanceByDom(liveBody)
+          : null
+    } catch {
+      chart = null
+    }
+    chartNode.removeAttribute('_echarts_instance_')
+    if (chart) {
+      const img = document.createElement('img')
+      img.src = chart.getDataURL({
+        type: 'png',
+        pixelRatio: 2,
+        backgroundColor: '#ffffff',
+      })
+      img.alt = el.getAttribute('describe') || ''
+      // 用实例尺寸而非克隆节点的 CSS 尺寸，避免页面缩放导致图片变形
+      img.style.width = `${chart.getWidth()}px`
+      img.style.height = `${chart.getHeight()}px`
+      chartNode.replaceWith(img)
+    } else {
+      // 实例不可用（未渲染/echarts 未加载）时退回清空，至少不留脏 DOM
       chartNode.innerHTML = ''
     }
   })

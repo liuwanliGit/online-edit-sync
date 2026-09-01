@@ -1,0 +1,22 @@
+{
+  "name": "oes-report-mcp",
+  "version": "0.1.0",
+  "description": "MCP server: LLM 生成报表文档(文本+表格+echarts 静态图)并导出 Word",
+  "type": "module",
+  "bin": {
+    "oes-report-mcp": "./server.mjs"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "start:http": "node http-server.mjs",
+    "demo": "node test-report.mjs",
+    "test:mcp": "node test-mcp-protocol.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@napi-rs/canvas": "^0.1.65",
+    "echarts": "^5.6.0",
+    "html-to-docx": "^1.8.0",
+    "zod": "^4.5.4"
+  }
+}
